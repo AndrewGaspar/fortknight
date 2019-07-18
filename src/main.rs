@@ -4,6 +4,7 @@ use clap::Arg;
 use fortknight::{AnalysisEngine, AnalysisOptions};
 
 const FILES: &'static str = "files";
+const PRINT_TOKENS: &'static str = "print_tokens";
 
 fn main() {
     let matches = clap::App::new("Fortknight")
@@ -14,6 +15,7 @@ fn main() {
                 .multiple(true)
                 .takes_value(true),
         )
+        .arg(Arg::with_name(PRINT_TOKENS).long("print-tokens"))
         .get_matches();
 
     let files: Vec<_> = matches
@@ -25,6 +27,7 @@ fn main() {
 
     let mut options = AnalysisOptions::default();
     options.files = files;
+    options.print_tokens = matches.is_present(PRINT_TOKENS);
 
     let engine = AnalysisEngine::new(options);
 }

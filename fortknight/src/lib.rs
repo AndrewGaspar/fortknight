@@ -1,16 +1,19 @@
-use std::{default::Default, path::PathBuf};
+use std::{convert::TryInto, default::Default, path::PathBuf};
 
 mod data;
 mod error;
+mod index;
 mod lex;
+mod span;
 
 use data::AnalysisData;
 use error::AnalysisErrorKind;
 
 /// Options configuring the AnalysisEngine
 #[derive(Default)]
-pub struct AnalysisOptions{
+pub struct AnalysisOptions {
     pub files: Vec<PathBuf>,
+    pub print_tokens: bool,
 }
 
 impl AnalysisOptions {}
@@ -40,13 +43,27 @@ impl AnalysisEngine {
     pub fn report_error(&mut self) {}
 
     fn add_file(&mut self, file_path: PathBuf) -> Result<(), AnalysisErrorKind> {
-        let contents = match std::fs::read(&file_path) {
+        let contents = match std::fs::read_to_string(&file_path) {
             Ok(contents) => contents,
             Err(err) => return Err(AnalysisErrorKind::Io(err)),
         };
 
         self.data.file_data.file_names.push(file_path);
         self.data.file_data.contents.push(contents);
+
+        let tokenizer = lex::Tokenizer::new(
+            index::FileId(
+                (self.data.file_data.file_names.len() - 1)
+                    .try_into()
+                    .unwrap(),
+            ),
+            &self.data.file_data.contents.last().unwrap(),
+        );
+
+        if self.options.print_tokens {
+            let tokens: Vec<_> = tokenizer.collect();
+            println!("{:?}", tokens);
+        }
 
         Ok(())
     }

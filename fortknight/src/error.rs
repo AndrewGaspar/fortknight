@@ -5,3 +5,11 @@ pub enum AnalysisErrorKind {
     // System Errors: E9000+
     Io(std::io::Error)
 }
+
+impl AnalysisErrorKind {
+    pub fn code(&self) -> u16 {
+        match self {
+            AnalysisErrorKind::Io(_) => 9000,
+        }
+    }
+}
