@@ -1,9 +1,4 @@
-use std::{
-    io::{BufReader, Read, Seek},
-    path::PathBuf,
-};
-
-use crate::error::AnalysisErrorKind;
+use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct FileData {
