@@ -9,6 +9,7 @@ mod span;
 
 use data::AnalysisData;
 use error::AnalysisErrorKind;
+use intern::InternedString;
 
 /// Options configuring the AnalysisEngine
 #[derive(Default)]
@@ -24,6 +25,7 @@ impl AnalysisOptions {}
 /// includes and common module files.
 pub struct AnalysisEngine {
     options: AnalysisOptions,
+    interner: intern::StringInterner,
     data: AnalysisData,
 }
 
@@ -31,6 +33,7 @@ impl AnalysisEngine {
     pub fn new(options: AnalysisOptions) -> Self {
         let mut engine = Self {
             options,
+            interner: intern::StringInterner::new(),
             data: AnalysisData::default(),
         };
 
@@ -39,6 +42,14 @@ impl AnalysisEngine {
         }
 
         engine
+    }
+
+    pub fn intern(&mut self, string: &str) -> InternedString {
+        self.interner.intern(string)
+    }
+    
+    pub fn intern_string(&mut self, string: String) -> InternedString {
+        self.interner.intern_string(string)
     }
 
     pub fn report_error(&mut self) {}
@@ -52,17 +63,17 @@ impl AnalysisEngine {
         self.data.file_data.file_names.push(file_path);
         self.data.file_data.contents.push(contents);
 
-        let tokenizer = lex::Tokenizer::new(
+        let tokens: Vec<_> = lex::Tokenizer::new(
+            &mut self.interner,
             index::FileId(
                 (self.data.file_data.file_names.len() - 1)
                     .try_into()
                     .unwrap(),
             ),
             &self.data.file_data.contents.last().unwrap(),
-        );
+        ).collect();
 
         if self.options.print_tokens {
-            let tokens: Vec<_> = tokenizer.collect();
             println!("{:?}", tokens);
         }
 

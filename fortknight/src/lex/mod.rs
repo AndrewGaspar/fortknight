@@ -1,14 +1,16 @@
 use std::iter::{FromIterator, Iterator};
+use std::num::NonZeroUsize;
 use std::slice;
 use std::str::CharIndices;
-use std::num::NonZeroUsize;
 
 use self::ErrorCode::*;
 use self::TakeUntil::*;
 use self::Tok::*;
 
-use crate::span::Span;
 use crate::index::FileId;
+use crate::intern::InternedString;
+use crate::span::Span;
+use crate::AnalysisEngine;
 
 #[cfg(test)]
 mod tests;
@@ -136,7 +138,7 @@ impl<'input> PartialEq for CaseInsensitiveUserStr<'input> {
 impl<'input> Eq for CaseInsensitiveUserStr<'input> {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Tok<'input> {
+pub enum Tok {
     // statements
     Program,
     End,
@@ -145,11 +147,11 @@ pub enum Tok<'input> {
     Print,
 
     // user strings
-    Id(CaseInsensitiveUserStr<'input>),
-    IntegerLiteralConstant(UserStr<'input>),
-    CharLiteralConstant(UserStr<'input>),
-    DigitString(UserStr<'input>),
-    DefinedOperator(CaseInsensitiveUserStr<'input>),
+    Id(InternedString),
+    IntegerLiteralConstant(InternedString),
+    CharLiteralConstant(InternedString),
+    DigitString(InternedString),
+    DefinedOperator(InternedString),
 
     // Symbols
     And,
@@ -237,18 +239,19 @@ pub enum Tok<'input> {
 }
 
 pub struct Tokenizer<'input> {
+    interner: &'input mut crate::intern::StringInterner,
     file_id: FileId,
     text: &'input str,
     chars: CharIndices<'input>,
     lookahead: Option<(usize, char)>,
     is_start: bool,
     is_end: bool,
-    last_token: Option<Result<Spanned<Tok<'input>>, Error>>,
+    last_token: Option<Result<Spanned<Tok>, Error>>,
 }
 
 pub type Spanned<T> = (usize, T, usize);
 
-const KEYWORDS: &'static [(&'static str, Tok<'static>)] = &[
+const KEYWORDS: &'static [(&'static str, Tok)] = &[
     ("ALLOCATABLE", Allocatable),
     ("ASYNCHRONOUS", Asynchronous),
     ("BIND", Bind),
@@ -290,7 +293,7 @@ const KEYWORDS: &'static [(&'static str, Tok<'static>)] = &[
     ("VOLATILE", Volatile),
 ];
 
-const INTRINSIC_OPERATORS: &'static [(&'static str, Tok<'static>)] = &[
+const INTRINSIC_OPERATORS: &'static [(&'static str, Tok)] = &[
     ("AND", And),
     ("EQ", EqualsOp),
     ("EQV", Equivalent),
@@ -307,8 +310,13 @@ const INTRINSIC_OPERATORS: &'static [(&'static str, Tok<'static>)] = &[
 ];
 
 impl<'input> Tokenizer<'input> {
-    pub fn new(file_id: FileId, text: &'input str) -> Tokenizer<'input> {
+    pub fn new(
+        interner: &'input mut crate::intern::StringInterner,
+        file_id: FileId,
+        text: &'input str,
+    ) -> Tokenizer<'input> {
         let mut t = Tokenizer {
+            interner,
             file_id,
             text: text,
             chars: text.char_indices(),
@@ -326,13 +334,13 @@ impl<'input> Tokenizer<'input> {
             location: Span {
                 file_id: self.file_id,
                 start,
-                end
+                end,
             },
             code: c,
         })
     }
 
-    fn operator(&mut self, idx0: usize) -> Result<Spanned<Tok<'input>>, Error> {
+    fn operator(&mut self, idx0: usize) -> Result<Spanned<Tok>, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_operator_continue(c) => Continue,
             Lookahead::Character('.') => Stop,
@@ -345,14 +353,14 @@ impl<'input> Tokenizer<'input> {
                 self.bump();
 
                 // don't include . in operator name
-                let operator = CaseInsensitiveUserStr::new(&self.text[idx0 + 1..idx1]);
+                let operator = &self.text[idx0 + 1..idx1];
 
                 let tok = INTRINSIC_OPERATORS
                     .iter()
-                    .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == operator)
+                    .filter(|&&(w, _)| w == operator)
                     .map(|&(_, ref t)| t.clone())
                     .next()
-                    .unwrap_or_else(|| DefinedOperator(operator));
+                    .unwrap_or_else(|| DefinedOperator(self.interner.intern(operator)));
 
                 Ok((idx0, tok, idx1 + 1))
             }
@@ -361,7 +369,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn identifierish(&mut self, idx0: usize) -> Result<Spanned<Tok<'input>>, Error> {
+    fn identifierish(&mut self, idx0: usize) -> Result<Spanned<Tok>, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_identifier_continue(c) => Continue,
             _ => Stop,
@@ -369,14 +377,14 @@ impl<'input> Tokenizer<'input> {
 
         match self.take_until(idx0, terminate) {
             Some(Ok(idx1)) => {
-                let word = CaseInsensitiveUserStr::new(&self.text[idx0..idx1]);
+                let word = &self.text[idx0..idx1];
 
                 let tok = KEYWORDS
                     .iter()
-                    .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == word)
+                    .filter(|&&(w, _)| w == word.to_string().to_uppercase())
                     .map(|&(_, ref t)| t.clone())
                     .next()
-                    .unwrap_or_else(|| Id(word));
+                    .unwrap_or_else(|| Id(self.interner.intern(word)));
 
                 Ok((idx0, tok, idx1))
             }
@@ -385,7 +393,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn string_literal(&mut self, idx0: usize, quote: char) -> Result<Spanned<Tok<'input>>, Error> {
+    fn string_literal(&mut self, idx0: usize, quote: char) -> Result<Spanned<Tok>, Error> {
         let mut escape = false;
         let terminate = |lookahead: Lookahead| {
             if escape {
@@ -398,7 +406,9 @@ impl<'input> Tokenizer<'input> {
                         Continue
                     }
                     Lookahead::Character(c) if c == quote => Stop,
-                    Lookahead::Character(c) if is_new_line_start(c) => Error(UnterminatedStringLiteral),
+                    Lookahead::Character(c) if is_new_line_start(c) => {
+                        Error(UnterminatedStringLiteral)
+                    }
                     Lookahead::Character(_) => Continue,
                     Lookahead::EOF => Error(UnterminatedStringLiteral),
                 }
@@ -409,15 +419,19 @@ impl<'input> Tokenizer<'input> {
             Some(Ok(idx1)) => {
                 self.bump(); // consume the closing quote
                              // do not include quotes in the str
-                let text = UserStr::new(&self.text[idx0 + 1..idx1]);
-                Ok((idx0, CharLiteralConstant(text), idx1 + 1))
+                let text = &self.text[idx0 + 1..idx1];
+                Ok((
+                    idx0,
+                    CharLiteralConstant(self.interner.intern(text)),
+                    idx1 + 1,
+                ))
             }
             Some(Err(err)) => Err(err),
             None => self.error(UnterminatedStringLiteral, idx0, None),
         }
     }
 
-    fn digit_string(&mut self, idx0: usize) -> Result<Spanned<Tok<'input>>, Error> {
+    fn digit_string(&mut self, idx0: usize) -> Result<Spanned<Tok>, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_digit(c) => Continue,
             _ => Stop,
@@ -426,7 +440,7 @@ impl<'input> Tokenizer<'input> {
         match self.take_until(idx0, terminate) {
             Some(Ok(idx1)) => Ok((
                 idx0,
-                DigitString(UserStr::new(&self.text[idx0..idx1])),
+                DigitString(self.interner.intern(&self.text[idx0..idx1])),
                 idx1 + 1,
             )),
             Some(Err(err)) => Err(err),
@@ -451,7 +465,7 @@ impl<'input> Tokenizer<'input> {
 
     // call when you want to consume a new-line token. Test if at the start of
     // a new line with is_new_line_start.
-    fn consume_new_line(&mut self) -> Option<Result<Spanned<Tok<'input>>, Error>> {
+    fn consume_new_line(&mut self) -> Option<Result<Spanned<Tok>, Error>> {
         loop {
             return match self.lookahead {
                 Some((idx0, '\n')) => {
@@ -465,7 +479,11 @@ impl<'input> Tokenizer<'input> {
                             Some(Ok((idx0, EOS, idx0 + 2)))
                         }
                         // CR is not a supported line ending
-                        _ => Some(self.error(InvalidCarriageReturn, idx0, NonZeroUsize::new(idx0 + 1))),
+                        _ => Some(self.error(
+                            InvalidCarriageReturn,
+                            idx0,
+                            NonZeroUsize::new(idx0 + 1),
+                        )),
                     }
                 }
                 Some((idx0, _)) => panic!("self.lookahead must match a new line start"),
@@ -499,7 +517,9 @@ impl<'input> Tokenizer<'input> {
                     continue;
                 }
                 // TODO: Read until end of token, log error, continue
-                Some((idx1, _)) if first_line => Some(self.error(UnexpectedToken, idx1, NonZeroUsize::new(idx1+1))),
+                Some((idx1, _)) if first_line => {
+                    Some(self.error(UnexpectedToken, idx1, NonZeroUsize::new(idx1 + 1)))
+                }
                 // If an & is encountered, we're done processing the
                 // continuation. The caller should continue whatever
                 // tokenization process it was previously performing.
@@ -531,7 +551,7 @@ impl<'input> Tokenizer<'input> {
         None
     }
 
-    fn internal_next(&mut self) -> Option<Result<Spanned<Tok<'input>>, Error>> {
+    fn internal_next(&mut self) -> Option<Result<Spanned<Tok>, Error>> {
         loop {
             return match self.lookahead {
                 Some((idx0, '=')) => {
@@ -709,9 +729,9 @@ impl<'input> Tokenizer<'input> {
 }
 
 impl<'input> Iterator for Tokenizer<'input> {
-    type Item = Result<Spanned<Tok<'input>>, Error>;
+    type Item = Result<Spanned<Tok>, Error>;
 
-    fn next(&mut self) -> Option<Result<Spanned<Tok<'input>>, Error>> {
+    fn next(&mut self) -> Option<Result<Spanned<Tok>, Error>> {
         loop {
             if self.is_end {
                 return None;
