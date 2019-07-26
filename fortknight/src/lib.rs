@@ -3,6 +3,7 @@ use std::{convert::TryInto, default::Default, path::PathBuf};
 mod data;
 mod error;
 mod index;
+mod intern;
 mod lex;
 mod span;
 
