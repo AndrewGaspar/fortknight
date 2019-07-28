@@ -127,8 +127,8 @@ impl<'input> Eq for CaseInsensitiveUserStr<'input> {}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
-    kind: TokenKind,
-    span: Span,
+    pub kind: TokenKind,
+    pub span: Span,
 }
 
 impl Token {
@@ -818,7 +818,11 @@ impl<'input> Iterator for Tokenizer<'input> {
             // reached EOF - change to is_end state and return an EOS.
             if next_token.is_none() {
                 self.is_end = true;
-                next_token = Some(Ok(self.token(TokenKind::EOS, 0, 0)));
+                next_token = Some(Ok(self.token(
+                    TokenKind::EOS,
+                    self.text.len(),
+                    self.text.len(),
+                )));
             }
 
             if let Some(Ok(Token {

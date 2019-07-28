@@ -6,6 +6,7 @@ use crate::span::Span;
 pub struct FileData {
     pub file_names: Vec<PathBuf>,
     pub contents: Vec<String>,
+    pub lines: Vec<Vec<usize>>,
 }
 
 impl FileData {

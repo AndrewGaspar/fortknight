@@ -46,6 +46,16 @@ impl AnalysisEngine {
 
     pub fn report_error(&mut self) {}
 
+    fn read_line_starts(contents: &str) -> Vec<usize> {
+        let mut line_starts = vec![0];
+        for (i, c) in contents.char_indices() {
+            if c == '\n' {
+                line_starts.push(i + 1);
+            }
+        }
+        line_starts
+    }
+
     fn add_file(&mut self, file_path: PathBuf) -> Result<(), AnalysisErrorKind> {
         let contents = match std::fs::read_to_string(&file_path) {
             Ok(contents) => contents,
@@ -53,26 +63,35 @@ impl AnalysisEngine {
         };
 
         self.data.file_data.file_names.push(file_path);
+        self.data
+            .file_data
+            .lines
+            .push(Self::read_line_starts(&contents));
         self.data.file_data.contents.push(contents);
 
-        let tokenizer = lex::Tokenizer::new(
-            index::FileId(
-                (self.data.file_data.file_names.len() - 1)
-                    .try_into()
-                    .unwrap(),
-            ),
-            &self.data.file_data.contents.last().unwrap(),
+        let file_id = index::FileId(
+            (self.data.file_data.file_names.len() - 1)
+                .try_into()
+                .unwrap(),
         );
 
+        let tokenizer = lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
         if self.options.print_tokens {
             let tokens: Vec<_> = tokenizer.collect();
-            println!(
-                "{:?}",
-                tokens
-                    .iter()
-                    .map(|x| x.as_ref().unwrap())
-                    .collect::<Vec<_>>()
-            );
+            for t in tokens
+                .iter()
+                .map(|x| x.as_ref().unwrap())
+                .collect::<Vec<_>>()
+            {
+                let line = match self.data.file_data.lines[file_id.0 as usize]
+                    .binary_search(&t.span.start)
+                {
+                    Ok(idx) => idx + 1,
+                    Err(next_idx) => next_idx,
+                };
+
+                println!("{:?}\t{:?}", t.kind, line);
+            }
 
             for t in tokens {
                 let t = t.unwrap();
