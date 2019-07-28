@@ -9,6 +9,7 @@ mod span;
 
 use data::AnalysisData;
 use error::AnalysisErrorKind;
+use intern::StringInterner;
 
 /// Options configuring the AnalysisEngine
 #[derive(Default)]
@@ -25,6 +26,7 @@ impl AnalysisOptions {}
 pub struct AnalysisEngine {
     options: AnalysisOptions,
     data: AnalysisData,
+    interner: StringInterner,
 }
 
 impl AnalysisEngine {
@@ -32,6 +34,7 @@ impl AnalysisEngine {
         let mut engine = Self {
             options,
             data: AnalysisData::default(),
+            interner: StringInterner::new(),
         };
 
         for path in engine.options.files.iter().cloned().collect::<Vec<_>>() {
@@ -63,7 +66,24 @@ impl AnalysisEngine {
 
         if self.options.print_tokens {
             let tokens: Vec<_> = tokenizer.collect();
-            println!("{:?}", tokens);
+            println!(
+                "{:?}",
+                tokens
+                    .iter()
+                    .map(|x| x.as_ref().unwrap())
+                    .collect::<Vec<_>>()
+            );
+
+            for t in tokens {
+                let t = t.unwrap();
+                if let Some(t) = t.try_into_identifierish() {
+                    t.intern(&self.data.file_data, &mut self.interner);
+                    t.intern_case_insensitive(&self.data.file_data, &mut self.interner);
+                } else if let Some(t) = t.try_into_operator() {
+                    t.intern(&self.data.file_data, &mut self.interner);
+                    t.intern_case_insensitive(&self.data.file_data, &mut self.interner);
+                }
+            }
         }
 
         Ok(())

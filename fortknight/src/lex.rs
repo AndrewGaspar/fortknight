@@ -5,7 +5,9 @@ use std::str::CharIndices;
 use self::ErrorCode::*;
 use self::TakeUntil::*;
 
+use crate::data::FileData;
 use crate::index::FileId;
+use crate::intern::{InternedString, StringInterner};
 use crate::span::Span;
 
 #[cfg(test)]
@@ -110,16 +112,14 @@ impl<'input> CaseInsensitiveUserStr<'input> {
         }
     }
 
-    pub fn iter(&self) -> UserStrIterator<'input> {
-        self.user_str.iter()
+    pub fn iter(&self) -> impl Iterator<Item = u8> + 'input {
+        self.user_str.iter().map(|c: u8| c.to_ascii_lowercase())
     }
 }
 
 impl<'input> PartialEq for CaseInsensitiveUserStr<'input> {
     fn eq(&self, other: &CaseInsensitiveUserStr) -> bool {
-        let to_lower = |c: u8| c.to_ascii_lowercase();
-
-        self.iter().map(&to_lower).eq(other.iter().map(&to_lower))
+        self.iter().eq(other.iter())
     }
 }
 
@@ -129,6 +129,79 @@ impl<'input> Eq for CaseInsensitiveUserStr<'input> {}
 pub struct Token {
     kind: TokenKind,
     span: Span,
+}
+
+impl Token {
+    pub fn try_into_identifierish(self) -> Option<IdentifierishToken> {
+        if self.kind == TokenKind::Id || KEYWORDS.iter().find(|k| k.1 == self.kind).is_some() {
+            Some(IdentifierishToken(self))
+        } else {
+            None
+        }
+    }
+
+    pub fn try_into_operator(self) -> Option<OperatorToken> {
+        if self.kind == TokenKind::DefinedOperator
+            || INTRINSIC_OPERATORS
+                .iter()
+                .find(|k| k.1 == self.kind)
+                .is_some()
+        {
+            Some(OperatorToken(self))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct IdentifierishToken(Token);
+
+impl IdentifierishToken {
+    pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
+        let user_str = UserStr::new(file_data.read_span(&self.0.span));
+        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+    }
+
+    pub fn intern_case_insensitive(
+        &self,
+        file_data: &FileData,
+        interner: &mut StringInterner,
+    ) -> InternedString {
+        let user_str = CaseInsensitiveUserStr::new(file_data.read_span(&self.0.span));
+        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct OperatorToken(Token);
+
+impl OperatorToken {
+    fn get_name_str<'a>(&self, file_data: &'a FileData) -> &'a str {
+        let text = file_data.read_span(&self.0.span);
+        debug_assert_eq!(".", &text[0..1]);
+        debug_assert_eq!(".", &text[text.len() - 1..]);
+
+        let mut name_span = self.0.span;
+        name_span.start += 1;
+        name_span.end -= 1;
+
+        file_data.read_span(&name_span)
+    }
+
+    pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
+        let user_str = UserStr::new(self.get_name_str(&file_data));
+        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+    }
+
+    pub fn intern_case_insensitive(
+        &self,
+        file_data: &FileData,
+        interner: &mut StringInterner,
+    ) -> InternedString {
+        let user_str = CaseInsensitiveUserStr::new(self.get_name_str(&file_data));
+        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
