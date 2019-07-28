@@ -1,6 +1,7 @@
 use std::iter::Iterator;
 use std::slice;
 use std::str::CharIndices;
+use std::convert::TryInto;
 
 use self::ErrorCode::*;
 use self::TakeUntil::*;
@@ -316,7 +317,7 @@ pub struct Tokenizer<'input> {
     file_id: FileId,
     text: &'input str,
     chars: CharIndices<'input>,
-    lookahead: Option<(usize, char)>,
+    lookahead: Option<(u32, char)>,
     is_start: bool,
     is_end: bool,
     last_token: Option<Result<Token, Error>>,
@@ -397,6 +398,8 @@ const INTRINSIC_OPERATORS: &'static [(&'static str, TokenKind)] = {
 
 impl<'input> Tokenizer<'input> {
     pub fn new(file_id: FileId, text: &'input str) -> Tokenizer<'input> {
+        assert!(text.len() <= u32::max_value() as usize, "Fortknight only supports a maximum of 4GB files.");
+
         let mut t = Tokenizer {
             file_id,
             text: text,
@@ -410,7 +413,15 @@ impl<'input> Tokenizer<'input> {
         t
     }
 
-    fn token(&self, kind: TokenKind, start: usize, end: usize) -> Token {
+    fn text_span(&self, start: u32, end: u32) -> &str {
+        &self.text[start as usize..end as usize]
+    }
+
+    fn text_len(&self) -> u32 {
+        self.text.len() as u32
+    }
+
+    fn token(&self, kind: TokenKind, start: u32, end: u32) -> Token {
         Token {
             kind,
             span: Span {
@@ -421,7 +432,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn error<T>(&self, c: ErrorCode, start: usize, end: usize) -> Result<T, Error> {
+    fn error<T>(&self, c: ErrorCode, start: u32, end: u32) -> Result<T, Error> {
         Err(Error {
             location: Span {
                 file_id: self.file_id,
@@ -432,7 +443,7 @@ impl<'input> Tokenizer<'input> {
         })
     }
 
-    fn operator(&mut self, idx0: usize) -> Result<Token, Error> {
+    fn operator(&mut self, idx0: u32) -> Result<Token, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_operator_continue(c) => Continue,
             Lookahead::Character('.') => Stop,
@@ -445,7 +456,7 @@ impl<'input> Tokenizer<'input> {
                 self.bump();
 
                 // don't include . in operator name
-                let operator = CaseInsensitiveUserStr::new(&self.text[idx0 + 1..idx1]);
+                let operator = CaseInsensitiveUserStr::new(&self.text_span(idx0 + 1, idx1));
 
                 let kind = INTRINSIC_OPERATORS
                     .iter()
@@ -457,11 +468,11 @@ impl<'input> Tokenizer<'input> {
                 Ok(self.token(kind, idx0, idx1 + 1))
             }
             Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedOperator, idx0, self.text.len() - 1),
+            None => self.error(UnterminatedOperator, idx0, self.text_len() - 1),
         }
     }
 
-    fn identifierish(&mut self, idx0: usize) -> Result<Token, Error> {
+    fn identifierish(&mut self, idx0: u32) -> Result<Token, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_identifier_continue(c) => Continue,
             _ => Stop,
@@ -469,7 +480,7 @@ impl<'input> Tokenizer<'input> {
 
         match self.take_until(idx0, terminate) {
             Some(Ok(idx1)) => {
-                let word = CaseInsensitiveUserStr::new(&self.text[idx0..idx1]);
+                let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
 
                 let kind = KEYWORDS
                     .iter()
@@ -481,11 +492,11 @@ impl<'input> Tokenizer<'input> {
                 Ok(self.token(kind, idx0, idx1))
             }
             Some(Err(err)) => Err(err),
-            None => self.error(UnrecognizedToken, idx0, self.text.len() - 1),
+            None => self.error(UnrecognizedToken, idx0, self.text_len() - 1),
         }
     }
 
-    fn string_literal(&mut self, idx0: usize, quote: char) -> Result<Token, Error> {
+    fn string_literal(&mut self, idx0: u32, quote: char) -> Result<Token, Error> {
         let mut escape = false;
         let terminate = |lookahead: Lookahead| {
             if escape {
@@ -513,11 +524,11 @@ impl<'input> Tokenizer<'input> {
                 Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1 + 1))
             }
             Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedStringLiteral, idx0, self.text.len() - 1),
+            None => self.error(UnterminatedStringLiteral, idx0, self.text_len() - 1),
         }
     }
 
-    fn digit_string(&mut self, idx0: usize) -> Result<Token, Error> {
+    fn digit_string(&mut self, idx0: u32) -> Result<Token, Error> {
         let terminate = |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_digit(c) => Continue,
             _ => Stop,
@@ -526,7 +537,7 @@ impl<'input> Tokenizer<'input> {
         match self.take_until(idx0, terminate) {
             Some(Ok(idx1)) => Ok(self.token(TokenKind::DigitString, idx0, idx1 + 1)),
             Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedStringLiteral, idx0, self.text.len() - 1),
+            None => self.error(UnterminatedStringLiteral, idx0, self.text_len() - 1),
         }
     }
 
@@ -570,7 +581,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn continuation(&mut self, idx0: usize) -> Option<Result<(), Error>> {
+    fn continuation(&mut self, idx0: u32) -> Option<Result<(), Error>> {
         let mut first_line = true;
 
         loop {
@@ -606,7 +617,7 @@ impl<'input> Tokenizer<'input> {
                 // If a new token is encountered, then the continuation has
                 // ended. The new character is a new token.
                 Some(_) => None,
-                None => Some(self.error(UnterminatedContinuationLine, idx0, self.text.len() - 1)),
+                None => Some(self.error(UnterminatedContinuationLine, idx0, self.text_len() - 1)),
             };
         }
     }
@@ -760,13 +771,13 @@ impl<'input> Tokenizer<'input> {
                     continue;
                 }
                 // TODO: Read until next whitespace, discard whole token, register error, and continue
-                Some((idx, _)) => Some(self.error(UnrecognizedToken, idx, self.text.len() - 1)),
+                Some((idx, _)) => Some(self.error(UnrecognizedToken, idx, self.text_len() - 1)),
                 None => None,
             };
         }
     }
 
-    fn take_until<F>(&mut self, idx0: usize, mut terminate: F) -> Option<Result<usize, Error>>
+    fn take_until<F>(&mut self, idx0: u32, mut terminate: F) -> Option<Result<u32, Error>>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
@@ -783,7 +794,7 @@ impl<'input> Tokenizer<'input> {
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
                     Stop => Some(Ok(last_idx + 1)),
-                    Error(err_code) => Some(self.error(err_code, idx0, self.text.len() - 1)),
+                    Error(err_code) => Some(self.error(err_code, idx0, (self.text.len() - 1).try_into().unwrap())),
                 },
                 Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
                     Continue => {
@@ -798,8 +809,8 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn bump(&mut self) -> Option<(usize, char)> {
-        self.lookahead = self.chars.next();
+    fn bump(&mut self) -> Option<(u32, char)> {
+        self.lookahead = self.chars.next().map(|(i, c)| (i as u32, c));
         self.lookahead
     }
 }
@@ -820,8 +831,8 @@ impl<'input> Iterator for Tokenizer<'input> {
                 self.is_end = true;
                 next_token = Some(Ok(self.token(
                     TokenKind::EOS,
-                    self.text.len(),
-                    self.text.len(),
+                    self.text.len().try_into().unwrap(),
+                    self.text.len().try_into().unwrap(),
                 )));
             }
 

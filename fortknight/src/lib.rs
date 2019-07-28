@@ -46,11 +46,11 @@ impl AnalysisEngine {
 
     pub fn report_error(&mut self) {}
 
-    fn read_line_starts(contents: &str) -> Vec<usize> {
-        let mut line_starts = vec![0];
+    fn read_line_starts(contents: &str) -> Vec<u32> {
+        let mut line_starts = vec![0u32];
         for (i, c) in contents.char_indices() {
             if c == '\n' {
-                line_starts.push(i + 1);
+                line_starts.push((i + 1) as u32);
             }
         }
         line_starts
@@ -83,14 +83,12 @@ impl AnalysisEngine {
                 .map(|x| x.as_ref().unwrap())
                 .collect::<Vec<_>>()
             {
-                let line = match self.data.file_data.lines[file_id.0 as usize]
-                    .binary_search(&t.span.start)
-                {
-                    Ok(idx) => idx + 1,
-                    Err(next_idx) => next_idx,
-                };
+                let location = self
+                    .data
+                    .file_data
+                    .display_location(&self.data.file_data.get_lin_col(&t.span.start_location()));
 
-                println!("{:?}\t{:?}", t.kind, line);
+                println!("{:>23} {}", format!("{:?}", t.kind), location);
             }
 
             for t in tokens {
