@@ -797,9 +797,7 @@ impl<'input> Tokenizer<'input> {
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
                     Stop => Some(Ok(last_idx + 1)),
-                    Error(err_code) => {
-                        Some(self.error(err_code, idx0, (self.text.len() - 1).try_into().unwrap()))
-                    }
+                    Error(err_code) => Some(self.error(err_code, idx0, self.text_len() - 1)),
                 },
                 Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
                     Continue => {
@@ -836,8 +834,8 @@ impl<'input> Iterator for Tokenizer<'input> {
                 self.is_end = true;
                 next_token = Some(Ok(self.token(
                     TokenKind::EOS,
-                    self.text.len().try_into().unwrap(),
-                    self.text.len().try_into().unwrap(),
+                    self.text_len(),
+                    self.text_len(),
                 )));
             }
 
