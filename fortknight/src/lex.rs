@@ -1,7 +1,7 @@
+use std::convert::TryInto;
 use std::iter::Iterator;
 use std::slice;
 use std::str::CharIndices;
-use std::convert::TryInto;
 
 use self::ErrorCode::*;
 use self::TakeUntil::*;
@@ -398,7 +398,10 @@ const INTRINSIC_OPERATORS: &'static [(&'static str, TokenKind)] = {
 
 impl<'input> Tokenizer<'input> {
     pub fn new(file_id: FileId, text: &'input str) -> Tokenizer<'input> {
-        assert!(text.len() <= u32::max_value() as usize, "Fortknight only supports a maximum of 4GB files.");
+        assert!(
+            text.len() <= u32::max_value() as usize,
+            "Fortknight only supports a maximum of 4GB files."
+        );
 
         let mut t = Tokenizer {
             file_id,
@@ -794,7 +797,9 @@ impl<'input> Tokenizer<'input> {
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
                     Stop => Some(Ok(last_idx + 1)),
-                    Error(err_code) => Some(self.error(err_code, idx0, (self.text.len() - 1).try_into().unwrap())),
+                    Error(err_code) => {
+                        Some(self.error(err_code, idx0, (self.text.len() - 1).try_into().unwrap()))
+                    }
                 },
                 Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
                     Continue => {
