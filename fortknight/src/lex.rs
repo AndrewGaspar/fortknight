@@ -1,10 +1,9 @@
-use std::iter::{FromIterator, Iterator};
+use std::iter::Iterator;
 use std::slice;
 use std::str::CharIndices;
 
 use self::ErrorCode::*;
 use self::TakeUntil::*;
-use self::TokenKind::*;
 
 use crate::index::FileId;
 use crate::span::Span;
@@ -136,7 +135,14 @@ pub struct Token {
 pub enum TokenKind {
     // statements
     Program,
+    Module,
     End,
+    Contains,
+    Function,
+    Subroutine,
+    Submodule,
+    Implicit,
+    None,
 
     // Actions
     Print,
@@ -243,63 +249,78 @@ pub struct Tokenizer<'input> {
     last_token: Option<Result<Token, Error>>,
 }
 
-const KEYWORDS: &'static [(&'static str, TokenKind)] = &[
-    ("ALLOCATABLE", Allocatable),
-    ("ASYNCHRONOUS", Asynchronous),
-    ("BIND", Bind),
-    ("C", C),
-    ("CHARACTER", Character),
-    ("CODIMENSION", Codimension),
-    ("COMPLEX", Complex),
-    ("CONTIGUOUS", Contiguous),
-    ("DIMENSION", Dimension),
-    ("DOUBLE", Double),
-    ("END", End),
-    ("EXTERNAL", External),
-    ("IN", In),
-    ("INOUT", Inout),
-    ("INTEGER", Integer),
-    ("INTENT", Intent),
-    ("INTRINSIC", Intrinsic),
-    ("KIND", Kind),
-    ("LOGICAL", Logical),
-    ("NAME", Name),
-    ("NON_INTRINSIC", NonIntrinsic),
-    ("ONLY", Only),
-    ("OPERATOR", Operator),
-    ("OPTIONAL", Optional),
-    ("OUT", Out),
-    ("PARAMETER", Parameter),
-    ("POINTER", Pointer),
-    ("PRECISION", Precision),
-    ("PRINT", Print),
-    ("PRIVATE", Private),
-    ("PROGRAM", Program),
-    ("PROTECTED", Protected),
-    ("PUBLIC", Public),
-    ("REAL", Real),
-    ("SAVE", Save),
-    ("TARGET", Target),
-    ("USE", Use),
-    ("VALUE", Value),
-    ("VOLATILE", Volatile),
-];
+const KEYWORDS: &'static [(&'static str, TokenKind)] = {
+    use self::TokenKind::*;
 
-const INTRINSIC_OPERATORS: &'static [(&'static str, TokenKind)] = &[
-    ("AND", And),
-    ("EQ", EqualsOp),
-    ("EQV", Equivalent),
-    ("FALSE", False),
-    ("GE", GreaterThanOrEquals),
-    ("GT", GreaterThan),
-    ("LE", LessThanOrEquals),
-    ("LT", LessThan),
-    ("NE", NotEqualsOp),
-    ("NEQV", NotEquivalent),
-    ("NOT", Not),
-    ("OR", Or),
-    ("TRUE", True),
-];
+    &[
+        ("ALLOCATABLE", Allocatable),
+        ("ASYNCHRONOUS", Asynchronous),
+        ("BIND", Bind),
+        ("C", C),
+        ("CHARACTER", Character),
+        ("CODIMENSION", Codimension),
+        ("COMPLEX", Complex),
+        ("CONTAINS", Contains),
+        ("CONTIGUOUS", Contiguous),
+        ("DIMENSION", Dimension),
+        ("DOUBLE", Double),
+        ("END", End),
+        ("EXTERNAL", External),
+        ("FUNCTION", Function),
+        ("IN", In),
+        ("INOUT", Inout),
+        ("INTEGER", Integer),
+        ("INTENT", Intent),
+        ("INTRINSIC", Intrinsic),
+        ("IMPLICIT", Implicit),
+        ("KIND", Kind),
+        ("LOGICAL", Logical),
+        ("MODULE", Module),
+        ("NAME", Name),
+        ("NON_INTRINSIC", NonIntrinsic),
+        ("NONE", None),
+        ("ONLY", Only),
+        ("OPERATOR", Operator),
+        ("OPTIONAL", Optional),
+        ("OUT", Out),
+        ("PARAMETER", Parameter),
+        ("POINTER", Pointer),
+        ("PRECISION", Precision),
+        ("PRINT", Print),
+        ("PRIVATE", Private),
+        ("PROGRAM", Program),
+        ("PROTECTED", Protected),
+        ("PUBLIC", Public),
+        ("REAL", Real),
+        ("SAVE", Save),
+        ("SUBROUTINE", Subroutine),
+        ("SUBMODULE", Submodule),
+        ("TARGET", Target),
+        ("USE", Use),
+        ("VALUE", Value),
+        ("VOLATILE", Volatile),
+    ]
+};
+
+const INTRINSIC_OPERATORS: &'static [(&'static str, TokenKind)] = {
+    use self::TokenKind::*;
+
+    &[
+        ("AND", And),
+        ("EQ", EqualsOp),
+        ("EQV", Equivalent),
+        ("FALSE", False),
+        ("GE", GreaterThanOrEquals),
+        ("GT", GreaterThan),
+        ("LE", LessThanOrEquals),
+        ("LT", LessThan),
+        ("NE", NotEqualsOp),
+        ("NEQV", NotEquivalent),
+        ("NOT", Not),
+        ("OR", Or),
+        ("TRUE", True),
+    ]
+};
 
 impl<'input> Tokenizer<'input> {
     pub fn new(file_id: FileId, text: &'input str) -> Tokenizer<'input> {
@@ -358,7 +379,7 @@ impl<'input> Tokenizer<'input> {
                     .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == operator)
                     .map(|&(_, ref t)| t.clone())
                     .next()
-                    .unwrap_or_else(|| DefinedOperator);
+                    .unwrap_or_else(|| TokenKind::DefinedOperator);
 
                 Ok(self.token(kind, idx0, idx1 + 1))
             }
@@ -382,7 +403,7 @@ impl<'input> Tokenizer<'input> {
                     .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == word)
                     .map(|&(_, ref t)| t.clone())
                     .next()
-                    .unwrap_or_else(|| Id);
+                    .unwrap_or_else(|| TokenKind::Id);
 
                 Ok(self.token(kind, idx0, idx1))
             }
@@ -416,7 +437,7 @@ impl<'input> Tokenizer<'input> {
         match self.take_until(idx0, terminate) {
             Some(Ok(idx1)) => {
                 self.bump(); // consume the closing quote
-                Ok(self.token(CharLiteralConstant, idx0, idx1 + 1))
+                Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1 + 1))
             }
             Some(Err(err)) => Err(err),
             None => self.error(UnterminatedStringLiteral, idx0, self.text.len() - 1),
@@ -430,7 +451,7 @@ impl<'input> Tokenizer<'input> {
         };
 
         match self.take_until(idx0, terminate) {
-            Some(Ok(idx1)) => Ok(self.token(DigitString, idx0, idx1 + 1)),
+            Some(Ok(idx1)) => Ok(self.token(TokenKind::DigitString, idx0, idx1 + 1)),
             Some(Err(err)) => Err(err),
             None => self.error(UnterminatedStringLiteral, idx0, self.text.len() - 1),
         }
@@ -458,13 +479,13 @@ impl<'input> Tokenizer<'input> {
             return match self.lookahead {
                 Some((idx0, '\n')) => {
                     self.bump();
-                    Some(Ok(self.token(EOS, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 1)))
                 }
                 Some((idx0, '\r')) => {
                     match self.bump() {
                         Some((_, '\n')) => {
                             self.bump();
-                            Some(Ok(self.token(EOS, idx0, idx0 + 2)))
+                            Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 2)))
                         }
                         // CR is not a supported line ending
                         _ => Some(self.error(InvalidCarriageReturn, idx0, idx0 + 1)),
@@ -546,18 +567,18 @@ impl<'input> Tokenizer<'input> {
                     match self.lookahead {
                         Some((idx1, '>')) => {
                             self.bump();
-                            Some(Ok(self.token(Arrow, idx0, idx1 + 1)))
+                            Some(Ok(self.token(TokenKind::Arrow, idx0, idx1 + 1)))
                         }
-                        _ => Some(Ok(self.token(Equals, idx0, idx0 + 1))),
+                        _ => Some(Ok(self.token(TokenKind::Equals, idx0, idx0 + 1))),
                     }
                 }
                 Some((idx0, '+')) => {
                     self.bump();
-                    Some(Ok(self.token(Plus, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::Plus, idx0, idx0 + 1)))
                 }
                 Some((idx0, '-')) => {
                     self.bump();
-                    Some(Ok(self.token(Minus, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::Minus, idx0, idx0 + 1)))
                 }
                 Some((idx0, '*')) => {
                     self.bump();
@@ -569,9 +590,9 @@ impl<'input> Tokenizer<'input> {
                     match self.lookahead {
                         Some((idx1, '*')) => {
                             self.bump();
-                            Some(Ok(self.token(StarStar, idx0, idx1 + 1)))
+                            Some(Ok(self.token(TokenKind::StarStar, idx0, idx1 + 1)))
                         }
-                        _ => Some(Ok(self.token(Star, idx0, idx0 + 1))),
+                        _ => Some(Ok(self.token(TokenKind::Star, idx0, idx0 + 1))),
                     }
                 }
                 Some((idx0, '/')) => {
@@ -584,30 +605,30 @@ impl<'input> Tokenizer<'input> {
                     match self.lookahead {
                         Some((idx1, '/')) => {
                             self.bump();
-                            Some(Ok(self.token(SlashSlash, idx0, idx1 + 1)))
+                            Some(Ok(self.token(TokenKind::SlashSlash, idx0, idx1 + 1)))
                         }
-                        _ => Some(Ok(self.token(Slash, idx0, idx0 + 1))),
+                        _ => Some(Ok(self.token(TokenKind::Slash, idx0, idx0 + 1))),
                     }
                 }
                 Some((idx0, '%')) => {
                     self.bump();
-                    Some(Ok(self.token(Percent, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::Percent, idx0, idx0 + 1)))
                 }
                 Some((idx0, '(')) => {
                     self.bump();
-                    Some(Ok(self.token(LeftParen, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::LeftParen, idx0, idx0 + 1)))
                 }
                 Some((idx0, ')')) => {
                     self.bump();
-                    Some(Ok(self.token(RightParen, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::RightParen, idx0, idx0 + 1)))
                 }
                 Some((idx0, '[')) => {
                     self.bump();
-                    Some(Ok(self.token(LeftBracket, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::LeftBracket, idx0, idx0 + 1)))
                 }
                 Some((idx0, ']')) => {
                     self.bump();
-                    Some(Ok(self.token(RightBracket, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::RightBracket, idx0, idx0 + 1)))
                 }
                 Some((idx0, '.')) => {
                     self.bump();
@@ -615,7 +636,7 @@ impl<'input> Tokenizer<'input> {
                 }
                 Some((idx0, ',')) => {
                     self.bump();
-                    Some(Ok(self.token(Comma, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::Comma, idx0, idx0 + 1)))
                 }
                 Some((_, c)) if is_new_line_start(c) => self.consume_new_line(),
                 Some((idx0, ':')) => {
@@ -628,14 +649,14 @@ impl<'input> Tokenizer<'input> {
                     match self.lookahead {
                         Some((idx1, ':')) => {
                             self.bump();
-                            Some(Ok(self.token(ColonColon, idx0, idx1 + 1)))
+                            Some(Ok(self.token(TokenKind::ColonColon, idx0, idx1 + 1)))
                         }
-                        _ => Some(Ok(self.token(Colon, idx0, idx0 + 1))),
+                        _ => Some(Ok(self.token(TokenKind::Colon, idx0, idx0 + 1))),
                     }
                 }
                 Some((idx0, ';')) => {
                     self.bump();
-                    Some(Ok(self.token(EOS, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 1)))
                 }
                 Some((_, '&')) => {
                     if let Some(err) = self.skip_continuation() {
@@ -724,15 +745,23 @@ impl<'input> Iterator for Tokenizer<'input> {
             // reached EOF - change to is_end state and return an EOS.
             if next_token.is_none() {
                 self.is_end = true;
-                next_token = Some(Ok(self.token(EOS, 0, 0)));
+                next_token = Some(Ok(self.token(TokenKind::EOS, 0, 0)));
             }
 
-            if let Some(Ok(Token { kind: EOS, .. })) = next_token {
+            if let Some(Ok(Token {
+                kind: TokenKind::EOS,
+                ..
+            })) = next_token
+            {
                 if self.is_start {
                     continue;
                 }
 
-                if let Some(Ok(Token { kind: EOS, .. })) = self.last_token {
+                if let Some(Ok(Token {
+                    kind: TokenKind::EOS,
+                    ..
+                })) = self.last_token
+                {
                     continue;
                 }
             }
