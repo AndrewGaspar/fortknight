@@ -1,5 +1,4 @@
 use std::iter::Iterator;
-use std::slice;
 use std::str::CharIndices;
 
 use self::ErrorCode::*;
@@ -70,7 +69,7 @@ impl<'input> UserStr<'input> {
     }
 
     pub fn iter(&self) -> UserStrIterator<'input> {
-        UserStrIterator::new(self.string.as_bytes().iter())
+        UserStrIterator::new(self.string.chars())
     }
 }
 
@@ -82,13 +81,20 @@ impl<'input> PartialEq for UserStr<'input> {
 
 impl<'input> Eq for UserStr<'input> {}
 
+impl<'input> ToString for UserStr<'input> {
+    fn to_string(&self) -> String {
+        use std::iter::FromIterator;
+        String::from_iter(self.iter())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct UserStrIterator<'input> {
-    str_iter: slice::Iter<'input, u8>,
+    str_iter: std::str::Chars<'input>,
 }
 
 impl<'input> UserStrIterator<'input> {
-    fn new(str_iter: slice::Iter<'input, u8>) -> UserStrIterator<'input> {
+    fn new(str_iter: std::str::Chars<'input>) -> UserStrIterator<'input> {
         UserStrIterator { str_iter: str_iter }
     }
 }
@@ -96,19 +102,19 @@ impl<'input> UserStrIterator<'input> {
 // Iterator over a FortranUserStr. Ignores continuation. This allows us to
 // tokenize the FORTRAN program without allocating any memory.
 impl<'input> Iterator for UserStrIterator<'input> {
-    type Item = u8;
+    type Item = char;
 
-    fn next(&mut self) -> Option<u8> {
+    fn next(&mut self) -> Option<char> {
         // if we're here, we can assume that the string is already a
         // valid identifier, which means the continuation is properly
         // terminated. Just continue until we see a closing ampersand.
         loop {
             return match self.str_iter.next() {
-                Some(amp) if *amp == b'&' => {
-                    while b'&' != *self.str_iter.next().unwrap() {}
+                Some(amp) if amp == '&' => {
+                    while '&' != self.str_iter.next().unwrap() {}
                     continue;
                 }
-                Some(x) => Some(*x),
+                Some(x) => Some(x),
                 None => None,
             };
         }
@@ -127,8 +133,8 @@ impl<'input> CaseInsensitiveUserStr<'input> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u8> + 'input {
-        self.user_str.iter().map(|c: u8| c.to_ascii_lowercase())
+    pub fn iter(&self) -> impl Iterator<Item = char> + 'input {
+        self.user_str.iter().map(|c: char| c.to_ascii_lowercase())
     }
 }
 
@@ -140,6 +146,13 @@ impl<'input> PartialEq for CaseInsensitiveUserStr<'input> {
 
 impl<'input> Eq for CaseInsensitiveUserStr<'input> {}
 
+impl<'input> ToString for CaseInsensitiveUserStr<'input> {
+    fn to_string(&self) -> String {
+        use std::iter::FromIterator;
+        String::from_iter(self.iter())
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
     pub kind: TokenKind,
@@ -149,7 +162,7 @@ pub struct Token {
 impl Token {
     pub fn try_into_identifierish(self) -> Option<IdentifierishToken> {
         if self.kind == TokenKind::Identifier
-            || KEYWORDS.iter().find(|k| k.1 == self.kind).is_some()
+            || KEYWORDS.iter().find(|&k| *k == self.kind).is_some()
         {
             Some(IdentifierishToken(self))
         } else {
@@ -177,7 +190,7 @@ pub struct IdentifierishToken(Token);
 impl IdentifierishToken {
     pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
         let user_str = UserStr::new(file_data.read_span(&self.0.span));
-        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+        interner.intern_string(user_str.to_string())
     }
 
     pub fn intern_case_insensitive(
@@ -186,7 +199,7 @@ impl IdentifierishToken {
         interner: &mut StringInterner,
     ) -> InternedString {
         let user_str = CaseInsensitiveUserStr::new(file_data.read_span(&self.0.span));
-        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+        interner.intern_string(user_str.to_string())
     }
 }
 
@@ -208,7 +221,7 @@ impl OperatorToken {
 
     pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
         let user_str = UserStr::new(self.get_name_str(&file_data));
-        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+        interner.intern_string(user_str.to_string())
     }
 
     pub fn intern_case_insensitive(
@@ -217,7 +230,7 @@ impl OperatorToken {
         interner: &mut StringInterner,
     ) -> InternedString {
         let user_str = CaseInsensitiveUserStr::new(self.get_name_str(&file_data));
-        interner.intern_string(String::from_utf8(user_str.iter().collect()).unwrap())
+        interner.intern_string(user_str.to_string())
     }
 }
 
@@ -498,181 +511,189 @@ pub struct Tokenizer<'input> {
     last_token: Option<Result<Token, Error>>,
 }
 
-const KEYWORDS: &'static [(&'static str, TokenKind)] = {
+lazy_static::lazy_static! {
+    static ref KEYWORDS_TRIE: radix_trie::Trie<String, TokenKind> = {
+        use std::iter::FromIterator;
+        radix_trie::Trie::from_iter(
+            KEYWORDS.iter().map(|kind| (format!("{:?}", kind).to_lowercase(), *kind)))
+    };
+}
+
+const KEYWORDS: &'static [TokenKind] = {
     use self::TokenKind::*;
 
     &[
-        ("ALLOCATABLE", Allocatable),
-        ("ASYNCHRONOUS", Asynchronous),
-        ("BIND", Bind),
-        ("C", C),
-        ("Call", Call),
-        ("CHARACTER", Character),
-        ("CODIMENSION", Codimension),
-        ("COMPLEX", Complex),
-        ("CONTAINS", Contains),
-        ("CONTIGUOUS", Contiguous),
-        ("DIMENSION", Dimension),
-        ("DOUBLE", Double),
-        ("END", End),
-        ("ENDFUNCTION", EndFunction),
-        ("ENDINTERFACE", EndInterface),
-        ("ENDMODULE", EndModule),
-        ("ENDPROCEDURE", EndProcedure),
-        ("ENDPROGRAM", EndProgram),
-        ("ENDSUBMODULE", EndSubmodule),
-        ("ENDSUBROUTINE", EndSubroutine),
-        ("EXTERNAL", External),
-        ("FUNCTION", Function),
-        ("IN", In),
-        ("INOUT", InOut),
-        ("INTEGER", Integer),
-        ("INTENT", Intent),
-        ("INTRINSIC", Intrinsic),
-        ("IMPLICIT", Implicit),
-        ("KIND", Kind),
-        ("LOGICAL", Logical),
-        ("MODULE", Module),
-        ("NAME", Name),
-        ("NON_INTRINSIC", NonIntrinsic),
-        ("NONE", None),
-        ("ONLY", Only),
-        ("OPERATOR", Operator),
-        ("OPTIONAL", Optional),
-        ("OUT", Out),
-        ("PARAMETER", Parameter),
-        ("POINTER", Pointer),
-        ("PRECISION", Precision),
-        ("PRINT", Print),
-        ("PRIVATE", Private),
-        ("PROGRAM", Program),
-        ("PROTECTED", Protected),
-        ("PUBLIC", Public),
-        ("REAL", Real),
-        ("SAVE", Save),
-        ("SUBROUTINE", Subroutine),
-        ("SUBMODULE", Submodule),
-        ("TARGET", Target),
-        ("USE", Use),
-        ("VALUE", Value),
-        ("VOLATILE", Volatile),
-        ("PROCEDURE", Procedure),
-        ("INTERFACE", Interface),
-        ("DOUBLEPRECISION", DoublePrecision),
-        ("ENUM", Enum),
-        ("ENDENUM", EndEnum),
-        ("TYPE", Type),
-        ("ENDTYPE", EndType),
-        ("CLASS", Class),
-        ("NAMELIST", Namelist),
-        ("EQUIVALENCE", Equivalence),
-        ("ALLOCATE", Allocate),
-        ("DEALLOCATE", Deallocate),
-        ("WHERE", Where),
-        ("ELSEWHERE", ElseWhere),
-        ("ENDWHERE", EndWhere),
-        ("FORALL", Forall),
-        ("ENDFORALL", EndForall),
-        ("ASSOCIATE", Associate),
-        ("ENDASSOCIATE", EndAssociate),
-        ("BLOCK", Block),
-        ("ENDBLOCK", EndBlock),
-        ("CHANGE", Change),
-        ("TEAM", Team),
-        ("ENDTEAM", EndTeam),
-        ("CRITICAL", Critical),
-        ("ENDCRITICAL", EndCritical),
-        ("DO", Do),
-        ("ENDDO", EndDo),
-        ("IF", If),
-        ("THEN", Then),
-        ("ELSE", Else),
-        ("ELSEIF", ElseIf),
-        ("ENDIF", EndIf),
-        ("CASE", Case),
-        ("SELECT", Select),
-        ("SELECTCASE", SelectCase),
-        ("DEFAULT", Default),
-        ("ENDSELECT", EndSelect),
-        ("RANK", Rank),
-        ("SELECTTYPE", SelectType),
-        ("IS", Is),
-        ("EXIT", Exit),
-        ("GO", Go),
-        ("TO", To),
-        ("GOTO", GoTo),
-        ("CONTINUE", Continue),
-        ("STOP", Stop),
-        ("ERROR", Error),
-        ("QUIET", Quiet),
-        ("FAIL", Fail),
-        ("IMAGE", Image),
-        ("SYNC", Sync),
-        ("ALL", All),
-        ("STAT", Stat),
-        ("ERRMSG", Errmsg),
-        ("IMAGES", Images),
-        ("MEMORY", Memory),
-        ("EVENT", Event),
-        ("POST", Post),
-        ("WAIT", Wait),
-        ("UNTIL_COUNT", Until_Count),
-        ("FORM", Form),
-        ("NEW_INDEX", New_Index),
-        ("LOCK", Lock),
-        ("ACQUIRED_LOCK", Acquired_Lock),
-        ("UNLOCK", Unlock),
-        ("FILE", File),
-        ("ENDFILE", EndFile),
-        ("BACKSPACE", Backspace),
-        ("REWIND", Rewind),
-        ("FLUSH", Flush),
-        ("INQUIRE", Inquire),
-        ("OPEN", Open),
-        ("CLOSE", Close),
-        ("READ", Read),
-        ("WRITE", Write),
-        ("ACCESS", Access),
-        ("ACTION", Action),
-        ("ADVANCE", Advance),
-        ("BLANK", Blank),
-        ("DECIMAL", Decimal),
-        ("DELIM", Delim),
-        ("DIRECT", Direct),
-        ("ENCODING", Encoding),
-        ("EOR", Eor),
-        ("ERR", Err),
-        ("EXIST", Exist),
-        ("FMT", Fmt),
-        ("FORMATTED", Formatted),
-        ("ID", Id),
-        ("IOLENGTH", Iolength),
-        ("IOMSG", Iomsg),
-        ("IOSTAT", Iostat),
-        ("NAMED", Named),
-        ("NEWUNIT", NewUnit),
-        ("NEXTREC", Nextrec),
-        ("NML", Nml),
-        ("NUMBER", Number),
-        ("OPENED", Opened),
-        ("PAD", Pad),
-        ("PENDING", Pending),
-        ("POS", Pos),
-        ("POSITION", Position),
-        ("READWRITE", Readwrite),
-        ("REC", Rec),
-        ("RECL", Recl),
-        ("ROUND", Round),
-        ("SEQUENTIAL", Sequential),
-        ("SIGN", Sign),
-        ("SIZE", Size),
-        ("STATUS", Status),
-        ("STREAM", Stream),
-        ("UNFORMATTED", Unformatted),
-        ("UNIT", Unit),
-        ("DATA", Data),
-        ("BLOCKDATA", BlockData),
-        ("ENDBLOCKDATA", EndBlockData),
+        Allocatable,
+        Asynchronous,
+        Bind,
+        C,
+        Call,
+        Character,
+        Codimension,
+        Complex,
+        Contains,
+        Contiguous,
+        Dimension,
+        Double,
+        End,
+        EndFunction,
+        EndInterface,
+        EndModule,
+        EndProcedure,
+        EndProgram,
+        EndSubmodule,
+        EndSubroutine,
+        External,
+        Function,
+        In,
+        InOut,
+        Integer,
+        Intent,
+        Intrinsic,
+        Implicit,
+        Kind,
+        Logical,
+        Module,
+        Name,
+        NonIntrinsic,
+        None,
+        Only,
+        Operator,
+        Optional,
+        Out,
+        Parameter,
+        Pointer,
+        Precision,
+        Print,
+        Private,
+        Program,
+        Protected,
+        Public,
+        Real,
+        Save,
+        Subroutine,
+        Submodule,
+        Target,
+        Use,
+        Value,
+        Volatile,
+        Procedure,
+        Interface,
+        DoublePrecision,
+        Enum,
+        EndEnum,
+        Type,
+        EndType,
+        Class,
+        Namelist,
+        Equivalence,
+        Allocate,
+        Deallocate,
+        Where,
+        ElseWhere,
+        EndWhere,
+        Forall,
+        EndForall,
+        Associate,
+        EndAssociate,
+        Block,
+        EndBlock,
+        Change,
+        Team,
+        EndTeam,
+        Critical,
+        EndCritical,
+        Do,
+        EndDo,
+        If,
+        Then,
+        Else,
+        ElseIf,
+        EndIf,
+        Case,
+        Select,
+        SelectCase,
+        Default,
+        EndSelect,
+        Rank,
+        SelectType,
+        Is,
+        Exit,
+        Go,
+        To,
+        GoTo,
+        Continue,
+        Stop,
+        Error,
+        Quiet,
+        Fail,
+        Image,
+        Sync,
+        All,
+        Stat,
+        Errmsg,
+        Images,
+        Memory,
+        Event,
+        Post,
+        Wait,
+        Until_Count,
+        Form,
+        New_Index,
+        Lock,
+        Acquired_Lock,
+        Unlock,
+        File,
+        EndFile,
+        Backspace,
+        Rewind,
+        Flush,
+        Inquire,
+        Open,
+        Close,
+        Read,
+        Write,
+        Access,
+        Action,
+        Advance,
+        Blank,
+        Decimal,
+        Delim,
+        Direct,
+        Encoding,
+        Eor,
+        Err,
+        Exist,
+        Fmt,
+        Formatted,
+        Id,
+        Iolength,
+        Iomsg,
+        Iostat,
+        Named,
+        NewUnit,
+        Nextrec,
+        Nml,
+        Number,
+        Opened,
+        Pad,
+        Pending,
+        Pos,
+        Position,
+        Readwrite,
+        Rec,
+        Recl,
+        Round,
+        Sequential,
+        Sign,
+        Size,
+        Status,
+        Stream,
+        Unformatted,
+        Unit,
+        Data,
+        BlockData,
+        EndBlockData,
     ]
 };
 
@@ -785,12 +806,11 @@ impl<'input> Tokenizer<'input> {
             Some(Ok(idx1)) => {
                 let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
 
-                let kind = KEYWORDS
-                    .iter()
-                    .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == word)
-                    .map(|&(_, ref t)| t.clone())
-                    .next()
-                    .unwrap_or_else(|| TokenKind::Identifier);
+                let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
+                    *kind
+                } else {
+                    TokenKind::Identifier
+                };
 
                 Ok(self.token(kind, idx0, idx1))
             }

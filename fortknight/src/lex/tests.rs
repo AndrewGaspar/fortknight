@@ -8,7 +8,7 @@ fn basic() {
     // let engine = AnalysisEngine::new(options);
 
     let tokenizer = Tokenizer::new(FileId(0), r#"
-program foo
+PROGRAM foo
     if (x .eq. 7) then
         call mysub(8, 9)
     endif
