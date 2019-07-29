@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::iter::Iterator;
 use std::slice;
 use std::str::CharIndices;
@@ -20,7 +19,7 @@ pub struct Error {
     pub code: ErrorCode,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ErrorCode {
     UnrecognizedToken,
     UnterminatedStringLiteral,
@@ -28,6 +27,21 @@ pub enum ErrorCode {
     UnterminatedContinuationLine,
     InvalidCarriageReturn,
     UnexpectedToken,
+}
+
+impl ErrorCode {
+    pub fn code(self) -> u16 {
+        let code = match self {
+            UnrecognizedToken => 0,
+            UnterminatedStringLiteral => 1,
+            UnterminatedOperator => 2,
+            UnterminatedContinuationLine => 3,
+            InvalidCarriageReturn => 4,
+            UnexpectedToken => 5,
+        };
+        assert!(code < 1000);
+        code
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,7 +148,9 @@ pub struct Token {
 
 impl Token {
     pub fn try_into_identifierish(self) -> Option<IdentifierishToken> {
-        if self.kind == TokenKind::Id || KEYWORDS.iter().find(|k| k.1 == self.kind).is_some() {
+        if self.kind == TokenKind::Identifier
+            || KEYWORDS.iter().find(|k| k.1 == self.kind).is_some()
+        {
             Some(IdentifierishToken(self))
         } else {
             None
@@ -209,20 +225,26 @@ impl OperatorToken {
 pub enum TokenKind {
     // statements
     Program,
+    EndProgram,
     Module,
+    EndModule,
     End,
     Contains,
     Function,
+    EndFunction,
     Subroutine,
+    EndSubroutine,
     Submodule,
+    EndSubmodule,
+    Procedure,
+    EndProcedure,
+    Interface,
+    EndInterface,
     Implicit,
     None,
 
-    // Actions
-    Print,
-
     // user strings
-    Id,
+    Identifier,
     IntegerLiteralConstant,
     CharLiteralConstant,
     DigitString,
@@ -263,10 +285,11 @@ pub enum TokenKind {
     LeftBracket,
     RightBracket,
 
-    // Types
+    // Intrinsic Types
     Real,
     Double,
     Precision,
+    DoublePrecision,
     Complex,
     Character,
     Logical,
@@ -274,7 +297,21 @@ pub enum TokenKind {
     Percent,
     Kind,
 
-    // Attributes
+    // Derived Types
+    Enum,
+    EndEnum,
+    Type,
+    EndType,
+    Class,
+
+    // modules
+    Use,
+    NonIntrinsic,
+    Only,
+    Operator,
+
+    // Section 8: Attribute declarations and specifications
+    // 8.2: Type Declaration Statement
     Allocatable,
     Asynchronous,
     Codimension,
@@ -291,26 +328,164 @@ pub enum TokenKind {
     Target,
     Value,
     Volatile,
-
-    // Access
+    // 8.5.2: Accessibility Attribute
     Public,
     Private,
-
-    // LanguageBinding
+    // 8.5.5: BIND attribute for data entities
     Bind,
     C,
     Name,
-
-    // Intent
+    // 8.5.10: INTENT attribute
     In,
     Out,
-    Inout,
+    InOut,
+    // 8.9: NAMELIST statement
+    Namelist,
+    // 8.10.1: EQUIVALENCE statement
+    Equivalence,
+    // 8.10.2: COMMON statement
 
-    // modules
-    Use,
-    NonIntrinsic,
-    Only,
-    Operator,
+    // Section 9: Use of data objects
+    Allocate,
+    Deallocate,
+
+    // Section 10: Expressions and Assignment
+    Where,
+    ElseWhere,
+    EndWhere,
+    Forall,
+    EndForall,
+
+    // Section 11: Execution Control
+    Associate,
+    EndAssociate,
+    Block,
+    EndBlock,
+    Change,
+    Team,
+    EndTeam,
+    Critical,
+    EndCritical,
+    Do,
+    EndDo,
+    If,
+    Then,
+    Else,
+    ElseIf,
+    EndIf,
+    Case,
+    Select,
+    SelectCase,
+    Default,
+    EndSelect,
+    Rank,
+    // Select,
+    // Default,
+    // Type,
+    // Select,
+    SelectType,
+    // Class,
+    Is,
+    // Default,
+    Exit,
+    Go,
+    To,
+    GoTo,
+    Continue,
+    Stop,
+    Error,
+    Quiet,
+    Fail,
+    Image,
+    Sync,
+    All,
+    Stat,
+    Errmsg,
+    Images,
+    Memory,
+    // Team,
+    Event,
+    Post,
+    Wait,
+    #[allow(non_camel_case_types)]
+    Until_Count, // UNTIL_COUNT
+    Form,
+    #[allow(non_camel_case_types)]
+    New_Index, // NEW_INDEX
+    Lock,
+    #[allow(non_camel_case_types)]
+    Acquired_Lock, // ACQUIRED_LOCK
+    Unlock,
+
+    // Section 12: Files
+    File,
+    EndFile,
+    Backspace,
+    Rewind,
+    Flush,
+    Inquire,
+    Print,
+    Open,
+    Close,
+    Read,
+    Write,
+    // Wait,
+
+    // Section 12: File keywords
+    Access,
+    Action,
+    Advance,
+    // Asynchronous,
+    Blank,
+    Decimal,
+    Delim,
+    Direct,
+    Encoding,
+    Eor,
+    Err,
+    Exist,
+    // File,
+    Fmt,
+    // Form,
+    Formatted,
+    Id,
+    Iolength,
+    Iomsg,
+    Iostat,
+    // Name,
+    Named,
+    NewUnit,
+    Nextrec,
+    Nml,
+    Number,
+    Opened,
+    Pad,
+    Pending,
+    Pos,
+    Position,
+    // Read,
+    Readwrite,
+    Rec,
+    Recl,
+    Round,
+    Sequential,
+    Sign,
+    Size,
+    Status,
+    Stream,
+    Unformatted,
+    Unit,
+    // Write,
+
+    // Section 14: Program Units
+    // Block,
+    Data,
+    BlockData,
+    EndBlockData,
+
+    // Section 15: Procedures
+    // 15.5.1: Syntax of a procedure reference
+    Call,
 }
 
 pub struct Tokenizer<'input> {
@@ -331,6 +506,7 @@ const KEYWORDS: &'static [(&'static str, TokenKind)] = {
         ("ASYNCHRONOUS", Asynchronous),
         ("BIND", Bind),
         ("C", C),
+        ("Call", Call),
         ("CHARACTER", Character),
         ("CODIMENSION", Codimension),
         ("COMPLEX", Complex),
@@ -339,10 +515,17 @@ const KEYWORDS: &'static [(&'static str, TokenKind)] = {
         ("DIMENSION", Dimension),
         ("DOUBLE", Double),
         ("END", End),
+        ("ENDFUNCTION", EndFunction),
+        ("ENDINTERFACE", EndInterface),
+        ("ENDMODULE", EndModule),
+        ("ENDPROCEDURE", EndProcedure),
+        ("ENDPROGRAM", EndProgram),
+        ("ENDSUBMODULE", EndSubmodule),
+        ("ENDSUBROUTINE", EndSubroutine),
         ("EXTERNAL", External),
         ("FUNCTION", Function),
         ("IN", In),
-        ("INOUT", Inout),
+        ("INOUT", InOut),
         ("INTEGER", Integer),
         ("INTENT", Intent),
         ("INTRINSIC", Intrinsic),
@@ -373,6 +556,123 @@ const KEYWORDS: &'static [(&'static str, TokenKind)] = {
         ("USE", Use),
         ("VALUE", Value),
         ("VOLATILE", Volatile),
+        ("PROCEDURE", Procedure),
+        ("INTERFACE", Interface),
+        ("DOUBLEPRECISION", DoublePrecision),
+        ("ENUM", Enum),
+        ("ENDENUM", EndEnum),
+        ("TYPE", Type),
+        ("ENDTYPE", EndType),
+        ("CLASS", Class),
+        ("NAMELIST", Namelist),
+        ("EQUIVALENCE", Equivalence),
+        ("ALLOCATE", Allocate),
+        ("DEALLOCATE", Deallocate),
+        ("WHERE", Where),
+        ("ELSEWHERE", ElseWhere),
+        ("ENDWHERE", EndWhere),
+        ("FORALL", Forall),
+        ("ENDFORALL", EndForall),
+        ("ASSOCIATE", Associate),
+        ("ENDASSOCIATE", EndAssociate),
+        ("BLOCK", Block),
+        ("ENDBLOCK", EndBlock),
+        ("CHANGE", Change),
+        ("TEAM", Team),
+        ("ENDTEAM", EndTeam),
+        ("CRITICAL", Critical),
+        ("ENDCRITICAL", EndCritical),
+        ("DO", Do),
+        ("ENDDO", EndDo),
+        ("IF", If),
+        ("THEN", Then),
+        ("ELSE", Else),
+        ("ELSEIF", ElseIf),
+        ("ENDIF", EndIf),
+        ("CASE", Case),
+        ("SELECT", Select),
+        ("SELECTCASE", SelectCase),
+        ("DEFAULT", Default),
+        ("ENDSELECT", EndSelect),
+        ("RANK", Rank),
+        ("SELECTTYPE", SelectType),
+        ("IS", Is),
+        ("EXIT", Exit),
+        ("GO", Go),
+        ("TO", To),
+        ("GOTO", GoTo),
+        ("CONTINUE", Continue),
+        ("STOP", Stop),
+        ("ERROR", Error),
+        ("QUIET", Quiet),
+        ("FAIL", Fail),
+        ("IMAGE", Image),
+        ("SYNC", Sync),
+        ("ALL", All),
+        ("STAT", Stat),
+        ("ERRMSG", Errmsg),
+        ("IMAGES", Images),
+        ("MEMORY", Memory),
+        ("EVENT", Event),
+        ("POST", Post),
+        ("WAIT", Wait),
+        ("UNTIL_COUNT", Until_Count),
+        ("FORM", Form),
+        ("NEW_INDEX", New_Index),
+        ("LOCK", Lock),
+        ("ACQUIRED_LOCK", Acquired_Lock),
+        ("UNLOCK", Unlock),
+        ("FILE", File),
+        ("ENDFILE", EndFile),
+        ("BACKSPACE", Backspace),
+        ("REWIND", Rewind),
+        ("FLUSH", Flush),
+        ("INQUIRE", Inquire),
+        ("OPEN", Open),
+        ("CLOSE", Close),
+        ("READ", Read),
+        ("WRITE", Write),
+        ("ACCESS", Access),
+        ("ACTION", Action),
+        ("ADVANCE", Advance),
+        ("BLANK", Blank),
+        ("DECIMAL", Decimal),
+        ("DELIM", Delim),
+        ("DIRECT", Direct),
+        ("ENCODING", Encoding),
+        ("EOR", Eor),
+        ("ERR", Err),
+        ("EXIST", Exist),
+        ("FMT", Fmt),
+        ("FORMATTED", Formatted),
+        ("ID", Id),
+        ("IOLENGTH", Iolength),
+        ("IOMSG", Iomsg),
+        ("IOSTAT", Iostat),
+        ("NAMED", Named),
+        ("NEWUNIT", NewUnit),
+        ("NEXTREC", Nextrec),
+        ("NML", Nml),
+        ("NUMBER", Number),
+        ("OPENED", Opened),
+        ("PAD", Pad),
+        ("PENDING", Pending),
+        ("POS", Pos),
+        ("POSITION", Position),
+        ("READWRITE", Readwrite),
+        ("REC", Rec),
+        ("RECL", Recl),
+        ("ROUND", Round),
+        ("SEQUENTIAL", Sequential),
+        ("SIGN", Sign),
+        ("SIZE", Size),
+        ("STATUS", Status),
+        ("STREAM", Stream),
+        ("UNFORMATTED", Unformatted),
+        ("UNIT", Unit),
+        ("DATA", Data),
+        ("BLOCKDATA", BlockData),
+        ("ENDBLOCKDATA", EndBlockData),
     ]
 };
 
@@ -471,7 +771,7 @@ impl<'input> Tokenizer<'input> {
                 Ok(self.token(kind, idx0, idx1 + 1))
             }
             Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedOperator, idx0, self.text_len() - 1),
+            None => self.error(UnterminatedOperator, idx0, self.text_len()),
         }
     }
 
@@ -490,7 +790,7 @@ impl<'input> Tokenizer<'input> {
                     .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == word)
                     .map(|&(_, ref t)| t.clone())
                     .next()
-                    .unwrap_or_else(|| TokenKind::Id);
+                    .unwrap_or_else(|| TokenKind::Identifier);
 
                 Ok(self.token(kind, idx0, idx1))
             }
@@ -866,16 +1166,20 @@ impl<'input> Iterator for Tokenizer<'input> {
 
 // assumed that starting . has been consumed
 // the final character will need to be validated as a . and consumed
-fn is_operator_continue(c: char) -> bool {
+fn is_letter(c: char) -> bool {
     (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+fn is_operator_continue(c: char) -> bool {
+    is_letter(c)
 }
 
 fn is_identifier_start(c: char) -> bool {
-    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+    is_letter(c)
 }
 
 fn is_identifier_continue(c: char) -> bool {
-    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_')
+    is_letter(c) || is_digit(c) || (c == '_')
 }
 
 fn is_new_line_start(c: char) -> bool {
