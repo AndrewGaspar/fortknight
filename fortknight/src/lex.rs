@@ -290,7 +290,8 @@ pub enum TokenKind {
     ColonColon,
 
     // structure
-    EOS,
+    SemiColon,
+    NewLine,
     Comma,
 
     LeftParen,
@@ -886,13 +887,13 @@ impl<'input> Tokenizer<'input> {
             return match self.lookahead {
                 Some((idx0, '\n')) => {
                     self.bump();
-                    Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::NewLine, idx0, idx0 + 1)))
                 }
                 Some((idx0, '\r')) => {
                     match self.bump() {
                         Some((_, '\n')) => {
                             self.bump();
-                            Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 2)))
+                            Some(Ok(self.token(TokenKind::NewLine, idx0, idx0 + 2)))
                         }
                         // CR is not a supported line ending
                         _ => Some(self.error(InvalidCarriageReturn, idx0, idx0 + 1)),
@@ -1063,7 +1064,7 @@ impl<'input> Tokenizer<'input> {
                 }
                 Some((idx0, ';')) => {
                     self.bump();
-                    Some(Ok(self.token(TokenKind::EOS, idx0, idx0 + 1)))
+                    Some(Ok(self.token(TokenKind::SemiColon, idx0, idx0 + 1)))
                 }
                 Some((_, '&')) => {
                     if let Some(err) = self.skip_continuation() {
@@ -1153,28 +1154,10 @@ impl<'input> Iterator for Tokenizer<'input> {
             if next_token.is_none() {
                 self.is_end = true;
                 next_token = Some(Ok(self.token(
-                    TokenKind::EOS,
+                    TokenKind::NewLine,
                     self.text_len(),
                     self.text_len(),
                 )));
-            }
-
-            if let Some(Ok(Token {
-                kind: TokenKind::EOS,
-                ..
-            })) = next_token
-            {
-                if self.is_start {
-                    continue;
-                }
-
-                if let Some(Ok(Token {
-                    kind: TokenKind::EOS,
-                    ..
-                })) = self.last_token
-                {
-                    continue;
-                }
             }
 
             self.is_start = false;

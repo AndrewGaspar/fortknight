@@ -4,13 +4,12 @@ use super::Tokenizer;
 
 #[test]
 fn basic() {
-    let tokenizer = Tokenizer::new(FileId(0), r#"
+    let tokenizer = Tokenizer::new(FileId(0), "\
 PROGRAM foo
     if (x .eq. 7) then
         call mysub(8, 9)
     endif
-end program foo
-    "#);
+end program foo");
         
     {
         use super::TokenKind::*;
@@ -19,7 +18,7 @@ end program foo
             vec![
                 Program,
                 Identifier,
-                EOS,
+                NewLine,
                 If,
                 LeftParen,
                 Identifier,
@@ -27,7 +26,7 @@ end program foo
                 DigitString,
                 RightParen,
                 Then,
-                EOS,
+                NewLine,
                 Call,
                 Identifier,
                 LeftParen,
@@ -35,13 +34,13 @@ end program foo
                 Comma,
                 DigitString,
                 RightParen,
-                EOS,
+                NewLine,
                 EndIf,
-                EOS,
+                NewLine,
                 End,
                 Program,
                 Identifier,
-                EOS,
+                NewLine,
             ],
             tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
         );
@@ -50,7 +49,7 @@ end program foo
 
 #[test]
 fn with_continuations() {
-    let tokenizer = Tokenizer::new(FileId(0), r#"
+    let tokenizer = Tokenizer::new(FileId(0), "\
 PROG&
 &RAM foo
     i&
@@ -63,8 +62,7 @@ PROG&
     endif
 e&
 &n&
-&d program foo
-    "#);
+&d program foo");
         
     {
         use super::TokenKind::*;
@@ -73,7 +71,7 @@ e&
             vec![
                 Program,
                 Identifier,
-                EOS,
+                NewLine,
                 If,
                 LeftParen,
                 Identifier,
@@ -81,7 +79,7 @@ e&
                 DigitString,
                 RightParen,
                 Then,
-                EOS,
+                NewLine,
                 Call,
                 Identifier,
                 LeftParen,
@@ -89,13 +87,13 @@ e&
                 Comma,
                 DigitString,
                 RightParen,
-                EOS,
+                NewLine,
                 EndIf,
-                EOS,
+                NewLine,
                 End,
                 Program,
                 Identifier,
-                EOS,
+                NewLine,
             ],
             tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
         );
