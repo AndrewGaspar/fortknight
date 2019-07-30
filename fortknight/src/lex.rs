@@ -507,9 +507,6 @@ pub struct Tokenizer<'input> {
     text: &'input str,
     chars: CharIndices<'input>,
     lookahead: Option<(u32, char)>,
-    is_start: bool,
-    is_end: bool,
-    last_token: Option<Result<Token, Error>>,
 }
 
 lazy_static::lazy_static! {
@@ -730,9 +727,6 @@ impl<'input> Tokenizer<'input> {
             text: text,
             chars: text.char_indices(),
             lookahead: None,
-            is_start: true,
-            is_end: false,
-            last_token: None,
         };
         t.bump();
         t
@@ -769,60 +763,57 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn operator(&mut self, idx0: u32) -> Result<Token, Error> {
-        let terminate = |lookahead: Lookahead| match lookahead {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_operator_continue(c) => Continue,
             Lookahead::Character('.') => Stop,
             _ => Error(UnterminatedOperator),
-        };
+        })?;
 
-        match self.take_until(idx0, terminate) {
-            Some(Ok(idx1)) => {
-                // consume .
-                self.bump();
+        // consume .
+        self.bump();
 
-                // don't include . in operator name
-                let operator = CaseInsensitiveUserStr::new(&self.text_span(idx0 + 1, idx1));
+        // don't include . in operator name
+        let operator = CaseInsensitiveUserStr::new(&self.text_span(idx0 + 1, idx1));
 
-                let kind = INTRINSIC_OPERATORS
-                    .iter()
-                    .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == operator)
-                    .map(|&(_, ref t)| t.clone())
-                    .next()
-                    .unwrap_or_else(|| TokenKind::DefinedOperator);
+        let kind = INTRINSIC_OPERATORS
+            .iter()
+            .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == operator)
+            .map(|&(_, ref t)| t.clone())
+            .next()
+            .unwrap_or_else(|| TokenKind::DefinedOperator);
 
-                Ok(self.token(kind, idx0, idx1 + 1))
-            }
-            Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedOperator, idx0, self.text_len()),
-        }
+        Ok(self.token(kind, idx0, idx1 + 1))
     }
 
     fn identifierish(&mut self, idx0: u32) -> Result<Token, Error> {
-        let terminate = |lookahead: Lookahead| match lookahead {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_identifier_continue(c) => Continue,
             _ => Stop,
+        })?;
+
+        let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
+
+        let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
+            *kind
+        } else {
+            TokenKind::Identifier
         };
 
-        match self.take_until(idx0, terminate) {
-            Some(Ok(idx1)) => {
-                let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
+        Ok(self.token(kind, idx0, idx1))
+    }
 
-                let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
-                    *kind
-                } else {
-                    TokenKind::Identifier
-                };
+    fn unrecognized_token(&mut self, idx0: u32) -> Result<Token, Error> {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
+            Lookahead::Character(c) if c.is_whitespace() => Stop,
+            _ => Continue,
+        })?;
 
-                Ok(self.token(kind, idx0, idx1))
-            }
-            Some(Err(err)) => Err(err),
-            None => self.error(UnrecognizedToken, idx0, self.text_len() - 1),
-        }
+        self.error(UnrecognizedToken, idx0, idx1)
     }
 
     fn string_literal(&mut self, idx0: u32, quote: char) -> Result<Token, Error> {
         let mut escape = false;
-        let terminate = |lookahead: Lookahead| {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| {
             if escape {
                 escape = false;
                 Continue
@@ -840,29 +831,19 @@ impl<'input> Tokenizer<'input> {
                     Lookahead::EOF => Error(UnterminatedStringLiteral),
                 }
             }
-        };
+        })?;
 
-        match self.take_until(idx0, terminate) {
-            Some(Ok(idx1)) => {
-                self.bump(); // consume the closing quote
-                Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1 + 1))
-            }
-            Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedStringLiteral, idx0, self.text_len() - 1),
-        }
+        self.bump(); // consume the closing quote
+        Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1 + 1))
     }
 
     fn digit_string(&mut self, idx0: u32) -> Result<Token, Error> {
-        let terminate = |lookahead: Lookahead| match lookahead {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_digit(c) => Continue,
             _ => Stop,
-        };
+        })?;
 
-        match self.take_until(idx0, terminate) {
-            Some(Ok(idx1)) => Ok(self.token(TokenKind::DigitString, idx0, idx1 + 1)),
-            Some(Err(err)) => Err(err),
-            None => self.error(UnterminatedStringLiteral, idx0, self.text_len() - 1),
-        }
+        Ok(self.token(TokenKind::DigitString, idx0, idx1 + 1))
     }
 
     // expected that last seen character was '!'
@@ -1094,14 +1075,16 @@ impl<'input> Tokenizer<'input> {
                     self.bump();
                     continue;
                 }
-                // TODO: Read until next whitespace, discard whole token, register error, and continue
-                Some((idx, _)) => Some(self.error(UnrecognizedToken, idx, self.text_len() - 1)),
+                Some((idx, _)) => {
+                    self.bump();
+                    Some(self.unrecognized_token(idx))
+                }
                 None => None,
             };
         }
     }
 
-    fn take_until<F>(&mut self, idx0: u32, mut terminate: F) -> Option<Result<u32, Error>>
+    fn take_until<F>(&mut self, idx0: u32, mut terminate: F) -> Result<u32, Error>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
@@ -1110,15 +1093,15 @@ impl<'input> Tokenizer<'input> {
             return match self.lookahead {
                 Some((_, '&')) => {
                     if let Some(err) = self.skip_continuation() {
-                        return Some(Err(err));
+                        return Err(err);
                     }
 
                     continue;
                 }
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
-                    Stop => Some(Ok(last_idx + 1)),
-                    Error(err_code) => Some(self.error(err_code, idx0, self.text_len() - 1)),
+                    Stop => Ok(last_idx + 1),
+                    Error(err_code) => self.error(err_code, idx0, self.text_len() - 1),
                 },
                 Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
                     Continue => {
@@ -1126,8 +1109,8 @@ impl<'input> Tokenizer<'input> {
                         last_idx = idx1;
                         continue;
                     }
-                    Stop => Some(Ok(idx1)),
-                    Error(err_code) => Some(self.error(err_code, idx0, idx1)),
+                    Stop => Ok(idx1),
+                    Error(err_code) => self.error(err_code, idx0, idx1),
                 },
             };
         }
@@ -1143,27 +1126,7 @@ impl<'input> Iterator for Tokenizer<'input> {
     type Item = Result<Token, Error>;
 
     fn next(&mut self) -> Option<Result<Token, Error>> {
-        loop {
-            if self.is_end {
-                return None;
-            }
-
-            let mut next_token = self.internal_next();
-
-            // reached EOF - change to is_end state and return an EOS.
-            if next_token.is_none() {
-                self.is_end = true;
-                next_token = Some(Ok(self.token(
-                    TokenKind::NewLine,
-                    self.text_len(),
-                    self.text_len(),
-                )));
-            }
-
-            self.is_start = false;
-            self.last_token = next_token.clone();
-            return next_token;
-        }
+        self.internal_next()
     }
 }
 
