@@ -254,6 +254,7 @@ impl<'input> Tokenizer<'input> {
     fn unrecognized_token(&mut self, idx0: u32) -> Result<Token, Error> {
         let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if c.is_whitespace() => Stop,
+            Lookahead::EOF => Stop,
             _ => Continue,
         })?;
 
@@ -297,17 +298,14 @@ impl<'input> Tokenizer<'input> {
 
     // expected that last seen character was '!'
     // returns nothing - merely advances to end of comment.
-    fn commentary(&mut self) {
-        loop {
-            match self.lookahead {
-                Some((_, c)) if is_new_line_start(c) => return,
-                None => return,
-                Some(_) => {
-                    self.bump();
-                    continue;
-                }
-            }
-        }
+    fn commentary(&mut self, idx0: u32) -> Result<Token, Error> {
+        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
+            Lookahead::Character(c) if is_new_line_start(c) => Stop,
+            Lookahead::EOF => Stop,
+            _ => Continue,
+        })?;
+
+        Ok(self.token(TokenKind::Commentary, idx0, idx1))
     }
 
     // call when you want to consume a new-line token. Test if at the start of
@@ -340,9 +338,10 @@ impl<'input> Tokenizer<'input> {
 
         loop {
             return match self.lookahead {
-                Some((_, '!')) => {
+                Some((idx0, '!')) => {
                     self.bump();
-                    self.commentary();
+                    self.commentary(idx0)
+                        .expect("Internal error: Unexpected error parsing commentary");
                     continue;
                 }
                 Some((_, c)) if is_new_line_start(c) => {
@@ -511,10 +510,9 @@ impl<'input> Tokenizer<'input> {
                     self.bump();
                     Some(self.digit_string(idx0))
                 }
-                Some((_, '!')) => {
+                Some((idx0, '!')) => {
                     self.bump();
-                    self.commentary();
-                    continue;
+                    Some(self.commentary(idx0))
                 }
                 Some((idx0, c)) if is_identifier_start(c) => {
                     self.bump();

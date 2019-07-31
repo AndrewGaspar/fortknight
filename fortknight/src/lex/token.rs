@@ -12,8 +12,7 @@ pub struct Token {
 impl Token {
     fn get_internable_span(&self, file_data: &FileData) -> Option<Span> {
         let span = match self.kind {
-            TokenKind::Name => self.span,
-            TokenKind::Keyword(k) => self.span,
+            TokenKind::Name | TokenKind::Keyword(_) => self.span,
             TokenKind::DefinedOperator => {
                 let text = file_data.read_span(&self.span);
                 debug_assert_eq!(".", &text[..1], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
@@ -51,6 +50,9 @@ pub enum TokenKind {
     // user strings
     Name,
     Keyword(KeywordTokenKind),
+
+    Commentary,
+
     IntegerLiteralConstant,
     CharLiteralConstant,
     DigitString,
