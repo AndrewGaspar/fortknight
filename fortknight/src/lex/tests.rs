@@ -14,34 +14,35 @@ PROGRAM foo
 end program foo",
     );
     {
-        use super::TokenKind::*;
+        use super::KeywordTokenKind::*;
+        use super::TokenKind::{self, *};
 
         assert_eq!(
             vec![
-                Program,
-                Identifier,
+                Keyword(Program),
+                TokenKind::Name,
                 NewLine,
-                If,
+                Keyword(If),
                 LeftParen,
-                Identifier,
+                TokenKind::Name,
                 EqualsOp,
                 DigitString,
                 RightParen,
-                Then,
+                Keyword(Then),
                 NewLine,
-                Call,
-                Identifier,
+                Keyword(Call),
+                TokenKind::Name,
                 LeftParen,
                 DigitString,
                 Comma,
                 DigitString,
                 RightParen,
                 NewLine,
-                EndIf,
+                Keyword(EndIf),
                 NewLine,
-                End,
-                Program,
-                Identifier,
+                Keyword(End),
+                Keyword(Program),
+                TokenKind::Name,
             ],
             tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
         );
@@ -68,34 +69,35 @@ e&
 &d program foo",
     );
     {
-        use super::TokenKind::*;
+        use super::KeywordTokenKind::*;
+        use super::TokenKind::{self, *};
 
         assert_eq!(
             vec![
-                Program,
-                Identifier,
+                Keyword(Program),
+                TokenKind::Name,
                 NewLine,
-                If,
+                Keyword(If),
                 LeftParen,
-                Identifier,
+                TokenKind::Name,
                 EqualsOp,
                 DigitString,
                 RightParen,
-                Then,
+                Keyword(Then),
                 NewLine,
-                Call,
-                Identifier,
+                Keyword(Call),
+                TokenKind::Name,
                 LeftParen,
                 DigitString,
                 Comma,
                 DigitString,
                 RightParen,
                 NewLine,
-                EndIf,
+                Keyword(EndIf),
                 NewLine,
-                End,
-                Program,
-                Identifier,
+                Keyword(End),
+                Keyword(Program),
+                TokenKind::Name,
             ],
             tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
         );
@@ -111,11 +113,7 @@ fn bad_token() {
                 use super::ErrorCode::*;
                 use super::TokenKind::*;
 
-                vec![
-                    Ok(Identifier),
-                    Result::Err(UnrecognizedToken),
-                    Ok(Identifier),
-                ]
+                vec![Ok(Name), Result::Err(UnrecognizedToken), Ok(Name)]
             },
             tokenizer
                 .map(|x| {

@@ -93,13 +93,7 @@ impl AnalysisEngine {
 
             for t in tokens {
                 let t = t.unwrap();
-                if let Some(t) = t.try_into_identifierish() {
-                    t.intern(&self.data.file_data, &mut self.interner);
-                    t.intern_case_insensitive(&self.data.file_data, &mut self.interner);
-                } else if let Some(t) = t.try_into_operator() {
-                    t.intern(&self.data.file_data, &mut self.interner);
-                    t.intern_case_insensitive(&self.data.file_data, &mut self.interner);
-                }
+                t.try_intern(&mut self.interner, &self.data.file_data);
             }
         }
 

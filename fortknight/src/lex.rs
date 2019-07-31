@@ -243,9 +243,9 @@ impl<'input> Tokenizer<'input> {
         let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
 
         let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
-            *kind
+            TokenKind::Keyword(*kind)
         } else {
-            TokenKind::Identifier
+            TokenKind::Name
         };
 
         Ok(self.token(kind, idx0, idx1))

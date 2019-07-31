@@ -1,7 +1,7 @@
-use crate::span::Span;
+use super::{CaseInsensitiveUserStr, UserStr};
 use crate::data::FileData;
-use crate::intern::{StringInterner, InternedString};
-use super::{UserStr, CaseInsensitiveUserStr};
+use crate::intern::{InternedName, StringInterner};
+use crate::span::Span;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
@@ -10,104 +10,47 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn try_into_identifierish(self) -> Option<IdentifierishToken> {
-        if self.kind == TokenKind::Identifier
-            || KEYWORDS.iter().find(|&k| *k == self.kind).is_some()
-        {
-            Some(IdentifierishToken(self))
-        } else {
-            None
-        }
+    fn get_internable_span(&self, file_data: &FileData) -> Option<Span> {
+        let span = match self.kind {
+            TokenKind::Name => self.span,
+            TokenKind::Keyword(k) => self.span,
+            TokenKind::DefinedOperator => {
+                let text = file_data.read_span(&self.span);
+                debug_assert_eq!(".", &text[..1], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
+                debug_assert_eq!(".", &text[text.len()-1..], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
+
+                let mut span = self.span;
+                span.start += 1;
+                span.end -= 1;
+                span
+            }
+            _ => return None,
+        };
+
+        Some(span)
     }
 
-    pub fn try_into_operator(self) -> Option<OperatorToken> {
-        if self.kind == TokenKind::DefinedOperator
-            || INTRINSIC_OPERATORS
-                .iter()
-                .find(|k| k.1 == self.kind)
-                .is_some()
-        {
-            Some(OperatorToken(self))
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct IdentifierishToken(Token);
-
-impl IdentifierishToken {
-    pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
-        let user_str = UserStr::new(file_data.read_span(&self.0.span));
-        interner.intern_string(user_str.to_string())
-    }
-
-    pub fn intern_case_insensitive(
+    pub fn try_intern(
         &self,
-        file_data: &FileData,
         interner: &mut StringInterner,
-    ) -> InternedString {
-        let user_str = CaseInsensitiveUserStr::new(file_data.read_span(&self.0.span));
-        interner.intern_string(user_str.to_string())
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct OperatorToken(Token);
-
-impl OperatorToken {
-    fn get_name_str<'a>(&self, file_data: &'a FileData) -> &'a str {
-        let text = file_data.read_span(&self.0.span);
-        debug_assert_eq!(".", &text[0..1]);
-        debug_assert_eq!(".", &text[text.len() - 1..]);
-
-        let mut name_span = self.0.span;
-        name_span.start += 1;
-        name_span.end -= 1;
-
-        file_data.read_span(&name_span)
-    }
-
-    pub fn intern(&self, file_data: &FileData, interner: &mut StringInterner) -> InternedString {
-        let user_str = UserStr::new(self.get_name_str(&file_data));
-        interner.intern_string(user_str.to_string())
-    }
-
-    pub fn intern_case_insensitive(
-        &self,
         file_data: &FileData,
-        interner: &mut StringInterner,
-    ) -> InternedString {
-        let user_str = CaseInsensitiveUserStr::new(self.get_name_str(&file_data));
-        interner.intern_string(user_str.to_string())
+    ) -> Option<InternedName> {
+        let span = self.get_internable_span(file_data)?;
+
+        Some(InternedName {
+            id: interner
+                .intern_string(CaseInsensitiveUserStr::new(file_data.read_span(&span)).to_string()),
+            case_sensitive_id: interner
+                .intern_string(UserStr::new(file_data.read_span(&span)).to_string()),
+        })
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TokenKind {
-    // statements
-    Program,
-    EndProgram,
-    Module,
-    EndModule,
-    End,
-    Contains,
-    Function,
-    EndFunction,
-    Subroutine,
-    EndSubroutine,
-    Submodule,
-    EndSubmodule,
-    Procedure,
-    EndProcedure,
-    Interface,
-    EndInterface,
-    Implicit,
-    None,
-
     // user strings
-    Identifier,
+    Name,
+    Keyword(KeywordTokenKind),
     IntegerLiteralConstant,
     CharLiteralConstant,
     DigitString,
@@ -130,8 +73,9 @@ pub enum TokenKind {
 
     Arrow,
     Equals,
-    Plus,
     Minus,
+    Percent,
+    Plus,
     Slash,
     SlashSlash,
     Star,
@@ -148,6 +92,29 @@ pub enum TokenKind {
     RightParen,
     LeftBracket,
     RightBracket,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum KeywordTokenKind {
+    // statements
+    Program,
+    EndProgram,
+    Module,
+    EndModule,
+    End,
+    Contains,
+    Function,
+    EndFunction,
+    Subroutine,
+    EndSubroutine,
+    Submodule,
+    EndSubmodule,
+    Procedure,
+    EndProcedure,
+    Interface,
+    EndInterface,
+    Implicit,
+    None,
 
     // Intrinsic Types
     Real,
@@ -158,7 +125,6 @@ pub enum TokenKind {
     Character,
     Logical,
     Integer,
-    Percent,
     Kind,
 
     // Derived Types
@@ -173,7 +139,6 @@ pub enum TokenKind {
     NonIntrinsic,
     Only,
     Operator,
-
     // Section 8: Attribute declarations and specifications
     // 8.2: Type Declaration Statement
     Allocatable,
@@ -352,17 +317,16 @@ pub enum TokenKind {
     Call,
 }
 
-
 lazy_static::lazy_static! {
-    pub static ref KEYWORDS_TRIE: radix_trie::Trie<String, TokenKind> = {
+    pub static ref KEYWORDS_TRIE: radix_trie::Trie<String, KeywordTokenKind> = {
         use std::iter::FromIterator;
         radix_trie::Trie::from_iter(
             KEYWORDS.iter().map(|kind| (format!("{:?}", kind).to_lowercase(), *kind)))
     };
 }
 
-pub const KEYWORDS: &'static [TokenKind] = {
-    use self::TokenKind::*;
+pub const KEYWORDS: &'static [KeywordTokenKind] = {
+    use self::KeywordTokenKind::*;
 
     &[
         Allocatable,

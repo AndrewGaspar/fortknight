@@ -13,11 +13,17 @@ pub struct Span {
 
 impl Span {
     pub fn start_location(&self) -> Location {
-        Location { file_id: self.file_id, location: self.start }
+        Location {
+            file_id: self.file_id,
+            location: self.start,
+        }
     }
-    
+
     pub fn end_location(&self) -> Location {
-        Location { file_id: self.file_id, location: self.end }
+        Location {
+            file_id: self.file_id,
+            location: self.end,
+        }
     }
 }
 
@@ -42,10 +48,16 @@ pub struct LinColSpan {
 
 impl LinColSpan {
     pub fn start_location(&self) -> LinColLocation {
-        LinColLocation { file_id: self.file_id, location: self.start }
+        LinColLocation {
+            file_id: self.file_id,
+            location: self.start,
+        }
     }
-    
+
     pub fn end_location(&self) -> LinColLocation {
-        LinColLocation { file_id: self.file_id, location: self.end }
+        LinColLocation {
+            file_id: self.file_id,
+            location: self.end,
+        }
     }
 }

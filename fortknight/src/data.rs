@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use std::convert::TryInto;
+use std::path::PathBuf;
 
-use crate::span::{Span, LinCol, Location, LinColLocation, LinColSpan};
+use crate::span::{LinCol, LinColLocation, LinColSpan, Location, Span};
 
 #[derive(Default)]
 pub struct FileData {
@@ -16,17 +16,21 @@ impl FileData {
     }
 
     pub fn get_lin_col(&self, location: &Location) -> LinColLocation {
-        let line = match self.lines[location.file_id.0 as usize].binary_search(&location.location) {
-            Ok(idx) => idx,
-            Err(next_idx) => next_idx - 1,
-        }.try_into().unwrap();
+        let line =
+            match self.lines[location.file_id.0 as usize].binary_search(&location.location) {
+                Ok(idx) => idx,
+                Err(next_idx) => next_idx - 1,
+            }
+            .try_into()
+            .unwrap();
 
-        let column = (location.location - self.lines[location.file_id.0 as usize][line as usize]).try_into().unwrap();
+        let column = (location.location - self.lines[location.file_id.0 as usize][line as usize])
+            .try_into()
+            .unwrap();
 
         LinColLocation {
             file_id: location.file_id,
-            location: LinCol {line,
-            column }
+            location: LinCol { line, column },
         }
     }
 
@@ -39,7 +43,12 @@ impl FileData {
     }
 
     pub fn display_location(&self, span: &LinColLocation) -> String {
-        format!("{}:{}:{}", self.file_names[span.file_id.0 as usize].to_str().unwrap(), span.location.line + 1, span.location.column + 1)
+        format!(
+            "{}:{}:{}",
+            self.file_names[span.file_id.0 as usize].to_str().unwrap(),
+            span.location.line + 1,
+            span.location.column + 1
+        )
     }
 }
 
