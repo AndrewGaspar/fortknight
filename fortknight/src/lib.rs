@@ -80,20 +80,24 @@ impl AnalysisEngine {
             let tokens: Vec<_> = tokenizer.collect();
             for t in tokens
                 .iter()
-                .map(|x| x.as_ref().unwrap())
+                .map(|x| match x.as_ref() {
+                    Ok(t) => (t.span, format!("{:?}", t.kind)),
+                    Err(e) => (e.span, format!("{:?}", e.code)),
+                })
                 .collect::<Vec<_>>()
             {
                 let location = self
                     .data
                     .file_data
-                    .display_location(&self.data.file_data.get_lin_col(&t.span.start_location()));
+                    .display_location(&self.data.file_data.get_lin_col(&t.0.start_location()));
 
-                println!("{:>23} {}", format!("{:?}", t.kind), location);
+                println!("{:>23} {}", t.1, location);
             }
 
             for t in tokens {
-                let t = t.unwrap();
-                t.try_intern(&mut self.interner, &self.data.file_data);
+                if let Ok(t) = t {
+                    t.try_intern(&mut self.interner, &self.data.file_data);
+                }
             }
         }
 

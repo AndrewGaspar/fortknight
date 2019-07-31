@@ -18,7 +18,7 @@ use token::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
-    pub location: Span,
+    pub span: Span,
     pub code: ErrorCode,
 }
 
@@ -202,7 +202,7 @@ impl<'input> Tokenizer<'input> {
 
     fn error<T>(&self, c: ErrorCode, start: u32, end: u32) -> Result<T, Error> {
         Err(Error {
-            location: Span {
+            span: Span {
                 file_id: self.file_id,
                 start,
                 end,
@@ -406,6 +406,10 @@ impl<'input> Tokenizer<'input> {
                             self.bump();
                             Some(Ok(self.token(TokenKind::Arrow, idx0, idx1 + 1)))
                         }
+                        Some((idx1, '=')) => {
+                            self.bump();
+                            Some(Ok(self.token(TokenKind::EqualsEquals, idx0, idx1 + 1)))
+                        }
                         _ => Some(Ok(self.token(TokenKind::Equals, idx0, idx0 + 1))),
                     }
                 }
@@ -444,6 +448,10 @@ impl<'input> Tokenizer<'input> {
                             self.bump();
                             Some(Ok(self.token(TokenKind::SlashSlash, idx0, idx1 + 1)))
                         }
+                        Some((idx1, '=')) => {
+                            self.bump();
+                            Some(Ok(self.token(TokenKind::SlashEquals, idx0, idx1 + 1)))
+                        }
                         _ => Some(Ok(self.token(TokenKind::Slash, idx0, idx0 + 1))),
                     }
                 }
@@ -466,6 +474,36 @@ impl<'input> Tokenizer<'input> {
                 Some((idx0, ']')) => {
                     self.bump();
                     Some(Ok(self.token(TokenKind::RightBracket, idx0, idx0 + 1)))
+                }
+                Some((idx0, '<')) => {
+                    self.bump();
+
+                    if let Some(err) = self.skip_continuation() {
+                        return Some(Err(err));
+                    }
+
+                    match self.lookahead {
+                        Some((idx1, '=')) => {
+                            self.bump();
+                            Some(Ok(self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1)))
+                        }
+                        _ => Some(Ok(self.token(TokenKind::LeftAngle, idx0, idx0 + 1))),
+                    }
+                }
+                Some((idx0, '>')) => {
+                    self.bump();
+
+                    if let Some(err) = self.skip_continuation() {
+                        return Some(Err(err));
+                    }
+
+                    match self.lookahead {
+                        Some((idx1, '=')) => {
+                            self.bump();
+                            Some(Ok(self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1)))
+                        }
+                        _ => Some(Ok(self.token(TokenKind::RightAngle, idx0, idx0 + 1))),
+                    }
                 }
                 Some((idx0, '.')) => {
                     self.bump();
