@@ -4,9 +4,7 @@ use std::str::CharIndices;
 use self::ErrorCode::*;
 use self::TakeUntil::*;
 
-use crate::data::FileData;
 use crate::index::FileId;
-use crate::intern::{InternedString, StringInterner};
 use crate::span::Span;
 
 #[cfg(test)]
@@ -507,7 +505,16 @@ impl<'input> Tokenizer<'input> {
                 }
                 Some((idx0, '.')) => {
                     self.bump();
-                    Some(self.operator(idx0))
+                    if let Some(err) = self.skip_continuation() {
+                        return Some(Err(err));
+                    }
+
+                    match self.lookahead {
+                        // if followed by a letter, then this must be an operator
+                        Some((_, c)) if is_letter(c) => Some(self.operator(idx0)),
+                        // else just return the dot token
+                        _ => Some(Ok(self.token(TokenKind::Dot, idx0, idx0 + 1))),
+                    }
                 }
                 Some((idx0, ',')) => {
                     self.bump();

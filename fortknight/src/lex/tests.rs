@@ -1,59 +1,103 @@
-// use crate::{AnalysisEngine, AnalysisOptions};
-use super::Tokenizer;
+use super::{
+    token::{KeywordTokenKind, TokenKind},
+    ErrorCode, Tokenizer,
+};
 use crate::index::FileId;
+
+fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
+    let tokenizer = Tokenizer::new(FileId(0), text);
+
+    tokenizer
+        .map(|x| match x {
+            Ok(t) => Ok(t.kind),
+            Err(e) => Err(e.code),
+        })
+        .collect()
+}
+
+fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
+    let tokenizer = Tokenizer::new(FileId(0), text);
+
+    tokenizer.map(|x| x.unwrap().kind).collect()
+}
 
 #[test]
 fn basic() {
-    let tokenizer = Tokenizer::new(
-        FileId(0),
-        "\
+    use KeywordTokenKind::*;
+    use TokenKind::*;
+
+    assert_eq!(
+        vec![
+            Keyword(Program),
+            TokenKind::Name,
+            NewLine,
+            Keyword(If),
+            LeftParen,
+            TokenKind::Name,
+            EqualsOp,
+            DigitString,
+            RightParen,
+            Keyword(Then),
+            NewLine,
+            Keyword(Call),
+            TokenKind::Name,
+            LeftParen,
+            DigitString,
+            Comma,
+            DigitString,
+            RightParen,
+            NewLine,
+            Keyword(EndIf),
+            NewLine,
+            Keyword(End),
+            Keyword(Program),
+            TokenKind::Name,
+        ],
+        get_tokens_unwrap(
+            "\
 PROGRAM foo
     if (x .eq. 7) then
         call mysub(8, 9)
     endif
 end program foo",
+        ),
     );
-    {
-        use super::KeywordTokenKind::*;
-        use super::TokenKind::{self, *};
-
-        assert_eq!(
-            vec![
-                Keyword(Program),
-                TokenKind::Name,
-                NewLine,
-                Keyword(If),
-                LeftParen,
-                TokenKind::Name,
-                EqualsOp,
-                DigitString,
-                RightParen,
-                Keyword(Then),
-                NewLine,
-                Keyword(Call),
-                TokenKind::Name,
-                LeftParen,
-                DigitString,
-                Comma,
-                DigitString,
-                RightParen,
-                NewLine,
-                Keyword(EndIf),
-                NewLine,
-                Keyword(End),
-                Keyword(Program),
-                TokenKind::Name,
-            ],
-            tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
-        );
-    }
 }
 
 #[test]
 fn with_continuations() {
-    let tokenizer = Tokenizer::new(
-        FileId(0),
-        "\
+    use super::KeywordTokenKind::*;
+    use super::TokenKind::{self, *};
+
+    assert_eq!(
+        vec![
+            Keyword(Program),
+            TokenKind::Name,
+            NewLine,
+            Keyword(If),
+            LeftParen,
+            TokenKind::Name,
+            EqualsOp,
+            DigitString,
+            RightParen,
+            Keyword(Then),
+            NewLine,
+            Keyword(Call),
+            TokenKind::Name,
+            LeftParen,
+            DigitString,
+            Comma,
+            DigitString,
+            RightParen,
+            NewLine,
+            Keyword(EndIf),
+            NewLine,
+            Keyword(End),
+            Keyword(Program),
+            TokenKind::Name,
+        ],
+        get_tokens_unwrap(
+            "\
 PROG&
 &RAM foo
     i&
@@ -67,126 +111,90 @@ PROG&
 e&
 &n&
 &d program foo",
+        ),
     );
-    {
-        use super::KeywordTokenKind::*;
-        use super::TokenKind::{self, *};
-
-        assert_eq!(
-            vec![
-                Keyword(Program),
-                TokenKind::Name,
-                NewLine,
-                Keyword(If),
-                LeftParen,
-                TokenKind::Name,
-                EqualsOp,
-                DigitString,
-                RightParen,
-                Keyword(Then),
-                NewLine,
-                Keyword(Call),
-                TokenKind::Name,
-                LeftParen,
-                DigitString,
-                Comma,
-                DigitString,
-                RightParen,
-                NewLine,
-                Keyword(EndIf),
-                NewLine,
-                Keyword(End),
-                Keyword(Program),
-                TokenKind::Name,
-            ],
-            tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
-        );
-    }
 }
 
 #[test]
 fn bad_token() {
-    let tokenizer = Tokenizer::new(FileId(0), "x @ y");
-    {
-        assert_eq!(
-            {
-                use super::ErrorCode::*;
-                use super::TokenKind::*;
-
-                vec![Ok(Name), Result::Err(UnrecognizedToken), Ok(Name)]
-            },
-            tokenizer
-                .map(|x| {
-                    match x {
-                        Ok(t) => Ok(t.kind),
-                        Err(e) => Err(e.code),
-                    }
-                })
-                .collect::<Vec<_>>(),
-        );
-    }
+    assert_eq!(
+        vec![
+            Ok(TokenKind::Name),
+            Result::Err(ErrorCode::UnrecognizedToken),
+            Ok(TokenKind::Name)
+        ],
+        get_tokens("x @ y"),
+    );
 }
 
 #[test]
 fn commentary() {
-    let tokenizer = Tokenizer::new(
-        FileId(0),
-        "\
+    use super::KeywordTokenKind::*;
+    use TokenKind::*;
+
+    assert_eq!(
+        vec![
+            Keyword(Program),
+            TokenKind::Name,
+            NewLine,
+            Commentary,
+            NewLine,
+            Keyword(If),
+            LeftParen,
+            TokenKind::Name,
+            EqualsOp,
+            DigitString,
+            RightParen,
+            Keyword(Then),
+            Commentary,
+            NewLine,
+            Keyword(Call),
+            TokenKind::Name,
+            LeftParen,
+            DigitString,
+            Comma,
+            DigitString,
+            RightParen,
+            NewLine,
+            Keyword(EndIf),
+            NewLine,
+            Keyword(End),
+            Keyword(Program),
+            TokenKind::Name,
+        ],
+        get_tokens_unwrap(
+            "\
 PROGRAM foo
     ! This is a comment
     if (x .eq. 7) then ! And another one
         call mysub(8, 9)
     endif
-end program foo",
+end program foo"
+        ),
     );
-    {
-        use super::KeywordTokenKind::*;
-        use super::TokenKind::{self, *};
-
-        assert_eq!(
-            vec![
-                Keyword(Program),
-                TokenKind::Name,
-                NewLine,
-                Commentary,
-                NewLine,
-                Keyword(If),
-                LeftParen,
-                TokenKind::Name,
-                EqualsOp,
-                DigitString,
-                RightParen,
-                Keyword(Then),
-                Commentary,
-                NewLine,
-                Keyword(Call),
-                TokenKind::Name,
-                LeftParen,
-                DigitString,
-                Comma,
-                DigitString,
-                RightParen,
-                NewLine,
-                Keyword(EndIf),
-                NewLine,
-                Keyword(End),
-                Keyword(Program),
-                TokenKind::Name,
-            ],
-            tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
-        );
-    }
 }
 
 #[test]
 fn end_commentary() {
-    let tokenizer = Tokenizer::new(FileId(0), "! some comment at the end");
-    {
-        use super::TokenKind::Commentary;
+    assert_eq!(
+        vec![TokenKind::Commentary],
+        get_tokens_unwrap("! some comment at the end"),
+    );
+}
 
-        assert_eq!(
-            vec![Commentary],
-            tokenizer.map(|x| x.unwrap().kind).collect::<Vec<_>>(),
-        );
-    }
+#[test]
+fn dots_vs_operators() {
+    assert_eq!(vec![TokenKind::EqualsOp], get_tokens_unwrap(".eq."));
+
+    assert_eq!(vec![TokenKind::Dot], get_tokens_unwrap("."));
+
+    assert_eq!(
+        vec![Err(ErrorCode::UnterminatedOperator)],
+        get_tokens(".eq")
+    );
+
+    assert_eq!(
+        vec![TokenKind::Dot, TokenKind::DigitString],
+        get_tokens_unwrap(".8")
+    );
 }

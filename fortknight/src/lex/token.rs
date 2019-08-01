@@ -50,7 +50,8 @@ pub enum TokenKind {
     // user strings
     Name,
     Keyword(KeywordTokenKind),
-
+    
+    NewLine,
     Commentary,
 
     IntegerLiteralConstant,
@@ -84,17 +85,15 @@ pub enum TokenKind {
     StarStar,
     Colon,
     ColonColon,
+    Dot,
+    Comma,
+    SemiColon,
     EqualsEquals,
     SlashEquals,
     LeftAngle,
     LeftAngleEquals,
     RightAngle,
     RightAngleEquals,
-
-    // structure
-    SemiColon,
-    NewLine,
-    Comma,
 
     LeftParen,
     RightParen,
@@ -105,18 +104,12 @@ pub enum TokenKind {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum KeywordTokenKind {
     // statements
-    Program,
-    EndProgram,
-    Module,
-    EndModule,
     End,
     Contains,
     Function,
     EndFunction,
     Subroutine,
     EndSubroutine,
-    Submodule,
-    EndSubmodule,
     Procedure,
     EndProcedure,
     Interface,
@@ -142,11 +135,6 @@ pub enum KeywordTokenKind {
     EndType,
     Class,
 
-    // modules
-    Use,
-    NonIntrinsic,
-    Only,
-    Operator,
     // Section 8: Attribute declarations and specifications
     // 8.2: Type Declaration Statement
     Allocatable,
@@ -314,7 +302,26 @@ pub enum KeywordTokenKind {
     Unit,
     // Write,
 
+    // Section 13: Input/output editing
+    // 13.2.1: FORMAT statement
+    Format,
+
     // Section 14: Program Units
+    // 14.1: Main Program
+    Program,
+    EndProgram,
+    // 14.2: Modules
+    Module,
+    EndModule,
+    // 14.2.2: The USE statement and use association
+    Use,
+    Only,
+    //Intrinsic,
+    #[allow(non_camel_case_types)]
+    Non_Intrinsic,
+    Operator,
+    Submodule,
+    EndSubmodule,
     // Block,
     Data,
     BlockData,
@@ -369,7 +376,7 @@ pub const KEYWORDS: &'static [KeywordTokenKind] = {
         Logical,
         Module,
         Name,
-        NonIntrinsic,
+        Non_Intrinsic,
         None,
         Only,
         Operator,
@@ -508,6 +515,7 @@ pub const KEYWORDS: &'static [KeywordTokenKind] = {
         Data,
         BlockData,
         EndBlockData,
+        Format,
     ]
 };
 
