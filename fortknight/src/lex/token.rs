@@ -50,10 +50,11 @@ pub enum TokenKind {
     // user strings
     Name,
     Keyword(KeywordTokenKind),
-    
+
     NewLine,
     Commentary,
 
+    RealLiteralConstant,
     IntegerLiteralConstant,
     CharLiteralConstant,
     DigitString,
