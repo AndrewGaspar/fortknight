@@ -118,7 +118,12 @@ pub enum KeywordTokenKind {
     Implicit,
     None,
 
-    // Intrinsic Types
+    // Derived Types
+    // Section 7: Types
+    // 7.3.2.1: Type Specifier Syntax
+    Type,
+    Class,
+    // 7.4: Intrinsic Types
     Real,
     Double,
     Precision,
@@ -128,27 +133,63 @@ pub enum KeywordTokenKind {
     Logical,
     Integer,
     Kind,
-
-    // Derived Types
-    Enum,
-    EndEnum,
-    Type,
+    // 7.4.4.2: Character Type Specifier
+    Len,
+    // 7.5.2: Derived-type definition
+    // Type,
+    Abstract,
+    Bind,
+    C,
+    Extends,
     EndType,
-    Class,
-
-    // Section 8: Attribute declarations and specifications
-    // 8.2: Type Declaration Statement
+    // 7.5.2.3: Sequence type
+    Sequence,
+    // 7.5.3.1: Tyep parameter definition statement
+    // Kind,
+    // Len,
+    // 7.5.4.1: Component definition statement
     Allocatable,
-    Asynchronous,
     Codimension,
     Contiguous,
     Dimension,
+    Pointer,
+    // Procedure,
+    Nopass,
+    Pass,
+    // 7.5.4.8: Component accessiblity
+    Private,
+    // Pointer,
+    // 7.5.5: Type-bound procedures
+    // Private,
+    // Procedure,
+    Generic,
+    Deferred,
+    #[allow(non_camel_case_types)]
+    Non_Overridable,
+    // Nopass,
+    // Pass,
+    // 7.5.6.1: FINAL statement
+    Final,
+    // 7.6: Enumerations and Enumerators
+    Enum,
+    // Bind,
+    // C,
+    Enumerator,
+    EndEnum,
+
+    // Section 8: Attribute declarations and specifications
+    // 8.2: Type Declaration Statement
+    // Allocatable,
+    Asynchronous,
+    // Codimension,
+    // Contiguous,
+    // Dimension,
     External,
     Intent,
     Intrinsic,
     Optional,
     Parameter,
-    Pointer,
+    // Pointer,
     Protected,
     Save,
     Target,
@@ -156,10 +197,10 @@ pub enum KeywordTokenKind {
     Volatile,
     // 8.5.2: Accessibility Attribute
     Public,
-    Private,
+    // Private,
     // 8.5.5: BIND attribute for data entities
-    Bind,
-    C,
+    // Bind,
+    // C,
     Name,
     // 8.5.10: INTENT attribute
     In,
@@ -517,6 +558,17 @@ pub const KEYWORDS: &'static [KeywordTokenKind] = {
         BlockData,
         EndBlockData,
         Format,
+        Len,
+        Abstract,
+        Extends,
+        Sequence,
+        Nopass,
+        Pass,
+        Generic,
+        Deferred,
+        Non_Overridable,
+        Final,
+        Enumerator,
     ]
 };
 
