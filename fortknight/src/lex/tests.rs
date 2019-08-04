@@ -4,6 +4,8 @@ use super::{
 };
 use crate::index::FileId;
 
+mod intrinsics;
+
 fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
     let tokenizer = Tokenizer::new(FileId(0), text);
 
