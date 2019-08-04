@@ -106,15 +106,6 @@ pub enum TokenKind {
 pub enum KeywordTokenKind {
     // statements
     End,
-    Contains,
-    Function,
-    EndFunction,
-    Subroutine,
-    EndSubroutine,
-    Procedure,
-    EndProcedure,
-    Interface,
-    EndInterface,
     Implicit,
     None,
 
@@ -244,6 +235,7 @@ pub enum KeywordTokenKind {
 
     // Section 10: Expressions and Assignment
     Where,
+    Else,
     ElseWhere,
     EndWhere,
     Forall,
@@ -263,7 +255,7 @@ pub enum KeywordTokenKind {
     EndDo,
     If,
     Then,
-    Else,
+    // Else,
     ElseIf,
     EndIf,
     Case,
@@ -396,8 +388,62 @@ pub enum KeywordTokenKind {
     EndBlockData,
 
     // Section 15: Procedures
+    // 15.4.3.2: Interface block
+    Interface,
+    // Abstract,
+    EndInterface,
+    // Module,
+    // Procedure,
+    // Operator,
+    Assignment,
+    // Read,
+    // Formatted,
+    // Unformatted,
+    // Write,
+    // Formatted,
+    // Unformatted,
+    // 15.4.3.3: Generic statement
+    // Generic,
+    // 15.4.3.5: EXTERNAL statement
+    // External,
+    // 15.4.3.6: Procedure declaration statement
+    // Procedure,
+    // Intent,
+    // Optional,
+    // Pointer,
+    // Protected,
+    // Save,
+    // 15.4.3.7: INTRINSIC statement
+    // Intrinsic,
     // 15.5.1: Syntax of a procedure reference
     Call,
+    // 15.6: Procedure definition
+    // 15.6.2: Procedures defined by subprograms
+    // 15.6.2.1: General
+    Elemental,
+    Impure,
+    // Module,
+    #[allow(non_camel_case_types)]
+    Non_Recursive,
+    Pure,
+    Recursive,
+    // 15.6.2.2: Function subprogram
+    Function,
+    Result,
+    EndFunction,
+    // 15.6.2.3: Subroutine subprogram
+    Subroutine,
+    EndSubroutine,
+    // 15.6.2.5: Separate module procedures
+    // Module,
+    Procedure,
+    EndProcedure,
+    // 15.6.2.6: ENTRY statement
+    Entry,
+    // 15.6.2.7: RETURN statement
+    Return,
+    // 15.6.2.8: CONTAINS statement
+    Contains,
 }
 
 lazy_static::lazy_static! {
@@ -603,6 +649,15 @@ pub const KEYWORDS: &'static [KeywordTokenKind] = {
         Mold,
         Source,
         Nullify,
+        Assignment,
+        Elemental,
+        Impure,
+        Non_Recursive,
+        Pure,
+        Recursive,
+        Result,
+        Entry,
+        Return,
     ]
 };
 
