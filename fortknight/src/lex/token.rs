@@ -202,19 +202,45 @@ pub enum KeywordTokenKind {
     // Bind,
     // C,
     Name,
+    // 8.5.8: DIMENSION attribute
+    // Dimension,
     // 8.5.10: INTENT attribute
     In,
     Out,
     InOut,
+    // 8.8: IMPORT statement
+    Import,
+    Only,
+    All,
+    // None,
     // 8.9: NAMELIST statement
     Namelist,
     // 8.10.1: EQUIVALENCE statement
     Equivalence,
     // 8.10.2: COMMON statement
+    Common,
 
     // Section 9: Use of data objects
+    // 9.4.4: Complex parts
+    Re,
+    Im,
+    // 9.6: Image selectors
+    Stat,
+    Team,
+    #[allow(non_camel_case_types)]
+    Team_Number,
+    // 9.7.1: ALLOCATE statement
     Allocate,
+    Errmsg,
+    Mold,
+    Source,
+    // Stat,
+    // 9.7.2: NULLIFY statement
+    Nullify,
+    // 9.7.3: DEALLOCATE statement
     Deallocate,
+    // Stat,
+    // Errmsg,
 
     // Section 10: Expressions and Assignment
     Where,
@@ -229,7 +255,7 @@ pub enum KeywordTokenKind {
     Block,
     EndBlock,
     Change,
-    Team,
+    // Team,
     EndTeam,
     Critical,
     EndCritical,
@@ -265,9 +291,9 @@ pub enum KeywordTokenKind {
     Fail,
     Image,
     Sync,
-    All,
-    Stat,
-    Errmsg,
+    // All,
+    // Stat,
+    // Errmsg,
     Images,
     Memory,
     // Team,
@@ -357,7 +383,7 @@ pub enum KeywordTokenKind {
     EndModule,
     // 14.2.2: The USE statement and use association
     Use,
-    Only,
+    // Only,
     //Intrinsic,
     #[allow(non_camel_case_types)]
     Non_Intrinsic,
@@ -569,6 +595,14 @@ pub const KEYWORDS: &'static [KeywordTokenKind] = {
         Non_Overridable,
         Final,
         Enumerator,
+        Import,
+        Common,
+        Re,
+        Im,
+        Team_Number,
+        Mold,
+        Source,
+        Nullify,
     ]
 };
 
