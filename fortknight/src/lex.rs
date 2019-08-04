@@ -29,6 +29,7 @@ pub enum ErrorCode {
     InvalidCarriageReturn,
     UnexpectedToken,
     MissingExponent,
+    DiscontinuedCharacterContext,
 }
 
 impl ErrorCode {
@@ -41,6 +42,7 @@ impl ErrorCode {
             InvalidCarriageReturn => 4,
             UnexpectedToken => 5,
             MissingExponent => 6,
+            DiscontinuedCharacterContext => 7,
         };
         assert!(code < 1000);
         code
@@ -262,18 +264,26 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn string_literal(&mut self, idx0: u32, quote: char) -> Result<Token, Error> {
-        let mut escape = false;
-        let idx1 = self.take_until(idx0, |lookahead: Lookahead| {
-            if escape {
-                escape = false;
-                Continue
-            } else {
+        let mut saw_closing_quote = false;
+
+        // TODO: Add optional, non-standard support for escape sequences. See gfortran
+        // -fbackslash option
+        // See: https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
+        let idx1 = self.take_until_terminate(idx0, true, |lookahead: Lookahead| {
+            if saw_closing_quote {
                 match lookahead {
-                    Lookahead::Character('\\') => {
-                        escape = true;
+                    Lookahead::Character(c) if c == quote => {
+                        saw_closing_quote = false;
                         Continue
                     }
-                    Lookahead::Character(c) if c == quote => Stop,
+                    Lookahead::Character(_) | Lookahead::EOF => Stop,
+                }
+            } else {
+                match lookahead {
+                    Lookahead::Character(c) if c == quote => {
+                        saw_closing_quote = true;
+                        Continue
+                    }
                     Lookahead::Character(c) if is_new_line_start(c) => {
                         Error(UnterminatedStringLiteral)
                     }
@@ -283,8 +293,7 @@ impl<'input> Tokenizer<'input> {
             }
         })?;
 
-        self.bump(); // consume the closing quote
-        Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1 + 1))
+        Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1))
     }
 
     fn take_digit_string(&mut self, idx0: u32) -> Result<u32, Error> {
@@ -365,6 +374,14 @@ impl<'input> Tokenizer<'input> {
             _ => Continue,
         })?;
 
+        // skip the newline for commentary - commentary can be considered EOL
+        match self.lookahead {
+            Some((_, c)) if is_new_line_start(c) => {
+                self.consume_new_line().unwrap()?;
+            }
+            _ => {}
+        }
+
         Ok(self.token(TokenKind::Commentary, idx0, idx1))
     }
 
@@ -430,7 +447,7 @@ impl<'input> Tokenizer<'input> {
                 // If a new token is encountered, then the continuation has
                 // ended. The new character is a new token.
                 Some(_) => Ok(false),
-                None => self.error(UnterminatedContinuationLine, idx0, self.text_len() - 1),
+                None => self.error(UnterminatedContinuationLine, idx0, self.text_len()),
             };
         }
     }
@@ -653,7 +670,12 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn take_until<F>(&mut self, idx0: u32, mut terminate: F) -> Result<u32, Error>
+    fn take_until_terminate<F>(
+        &mut self,
+        idx0: u32,
+        require_continue_context: bool,
+        mut terminate: F,
+    ) -> Result<u32, Error>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
@@ -662,8 +684,16 @@ impl<'input> Tokenizer<'input> {
             return match self.lookahead {
                 Some((_, '&')) => {
                     self.bump();
-                    self.continuation(idx0)?;
-                    continue;
+                    let continue_context = self.continuation(idx0)?;
+                    if require_continue_context && !continue_context {
+                        self.error(
+                            ErrorCode::DiscontinuedCharacterContext,
+                            idx0,
+                            self.lookahead.map_or(self.text_len(), |(i, _)| i),
+                        )
+                    } else {
+                        continue;
+                    }
                 }
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
@@ -681,6 +711,13 @@ impl<'input> Tokenizer<'input> {
                 },
             };
         }
+    }
+
+    fn take_until<F>(&mut self, idx0: u32, terminate: F) -> Result<u32, Error>
+    where
+        F: FnMut(Lookahead) -> TakeUntil,
+    {
+        self.take_until_terminate(idx0, false, terminate)
     }
 
     fn bump(&mut self) -> Option<(u32, char)> {

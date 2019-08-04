@@ -58,7 +58,6 @@ pub enum TokenKind {
     Commentary,
 
     RealLiteralConstant,
-    IntegerLiteralConstant,
     CharLiteralConstant,
     DigitString,
     DefinedOperator,

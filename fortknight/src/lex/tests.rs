@@ -5,8 +5,9 @@ use super::{
 use crate::index::FileId;
 
 mod intrinsics;
+mod strings;
 
-fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
+pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
     let tokenizer = Tokenizer::new(FileId(0), text);
 
     tokenizer
@@ -17,7 +18,7 @@ fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
         .collect()
 }
 
-fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
+pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
     let tokenizer = Tokenizer::new(FileId(0), text);
 
     tokenizer.map(|x| x.unwrap().kind).collect()
@@ -140,7 +141,6 @@ fn commentary() {
             TokenKind::Name,
             NewLine,
             Commentary,
-            NewLine,
             Keyword(If),
             LeftParen,
             TokenKind::Name,
@@ -149,7 +149,6 @@ fn commentary() {
             RightParen,
             Keyword(Then),
             Commentary,
-            NewLine,
             Keyword(Call),
             TokenKind::Name,
             LeftParen,
