@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 use std::path::PathBuf;
 
+use crate::lex::{OneError, Token};
 use crate::span::{LinCol, LinColLocation, LinColSpan, Location, Span};
 
 #[derive(Default)]
@@ -8,6 +9,8 @@ pub struct FileData {
     pub file_names: Vec<PathBuf>,
     pub contents: Vec<String>,
     pub lines: Vec<Vec<u32>>,
+    pub tokens: Vec<Vec<Token>>,
+    pub lex_errors: Vec<Vec<OneError>>,
 }
 
 impl FileData {

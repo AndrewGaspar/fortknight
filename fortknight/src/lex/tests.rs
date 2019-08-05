@@ -13,7 +13,7 @@ pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
     tokenizer
         .map(|x| match x {
             Ok(t) => Ok(t.kind),
-            Err(e) => Err(e.code),
+            Err(e) => Err(e.0[0].code),
         })
         .collect()
 }

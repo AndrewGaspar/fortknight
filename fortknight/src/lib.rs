@@ -77,28 +77,46 @@ impl AnalysisEngine {
         );
 
         let tokenizer = lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
+        let mut tokens = vec![];
+        let mut lex_errors = vec![];
+        for t in tokenizer {
+            match t {
+                Ok(token) => tokens.push(token),
+                Err(err) => {
+                    for e in err.0 {
+                        lex_errors.push(e);
+                    }
+                }
+            }
+        }
+        self.data.file_data.tokens.push(tokens);
+        self.data.file_data.lex_errors.push(lex_errors);
+
         if self.options.print_tokens {
+            let tokenizer =
+                lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
+
             let tokens: Vec<_> = tokenizer.collect();
-            for t in tokens
-                .iter()
-                .map(|x| match x.as_ref() {
-                    Ok(t) => (t.span, format!("{:?}", t.kind)),
-                    Err(e) => (e.span, format!("{:?}", e.code)),
-                })
-                .collect::<Vec<_>>()
-            {
+
+            println!("Tokens:");
+            for t in &self.data.file_data.tokens[file_id.0 as usize] {
                 let location = self
                     .data
                     .file_data
-                    .display_location(&self.data.file_data.get_lin_col(&t.0.start_location()));
+                    .display_location(&self.data.file_data.get_lin_col(&t.span.start_location()));
 
-                println!("{:>23} {}", t.1, location);
+                println!("\t{:>23?} {}", t.kind, location);
             }
+            println!();
 
-            for t in tokens {
-                if let Ok(t) = t {
-                    t.try_intern(&mut self.interner, &self.data.file_data);
-                }
+            eprintln!("Errors:");
+            for e in &self.data.file_data.lex_errors[file_id.0 as usize] {
+                let location = self
+                    .data
+                    .file_data
+                    .display_location(&self.data.file_data.get_lin_col(&e.span.start_location()));
+
+                eprintln!("\t{:>23?} {}", e.code, location);
             }
         }
 

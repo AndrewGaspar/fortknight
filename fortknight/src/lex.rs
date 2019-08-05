@@ -1,6 +1,8 @@
 use std::iter::Iterator;
 use std::str::CharIndices;
 
+use arrayvec::ArrayVec;
+
 use self::ErrorCode::*;
 use self::TakeUntil::*;
 
@@ -14,11 +16,23 @@ mod tests;
 mod token;
 
 use token::*;
+pub use token::{KeywordTokenKind, Token, TokenKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error {
+pub struct OneError {
     pub span: Span,
     pub code: ErrorCode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Error(pub ArrayVec<[OneError; 2]>);
+
+impl From<OneError> for Error {
+    fn from(err: OneError) -> Self {
+        use std::iter::FromIterator;
+
+        Error(ArrayVec::from_iter(std::iter::once(err)))
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -54,7 +68,7 @@ impl ErrorCode {
 enum TakeUntil {
     Continue,
     Stop,
-    Error(ErrorCode),
+    ErrCode(ErrorCode),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,22 +120,26 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn error<T>(&self, c: ErrorCode, start: u32, end: u32) -> Result<T, Error> {
-        Err(Error {
+    fn one_error(&self, c: ErrorCode, start: u32, end: u32) -> OneError {
+        OneError {
             span: Span {
                 file_id: self.file_id,
                 start,
                 end,
             },
             code: c,
-        })
+        }
+    }
+
+    fn error<T>(&self, c: ErrorCode, start: u32, end: u32) -> Result<T, Error> {
+        Err(self.one_error(c, start, end))?
     }
 
     fn operator(&mut self, idx0: u32) -> Result<Token, Error> {
         let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
             Lookahead::Character(c) if is_operator_continue(c) => Continue,
             Lookahead::Character('.') => Stop,
-            _ => Error(UnterminatedOperator),
+            _ => ErrCode(UnterminatedOperator),
         })?;
 
         // consume .
@@ -189,10 +207,10 @@ impl<'input> Tokenizer<'input> {
                         Continue
                     }
                     Lookahead::Character(c) if is_new_line_start(c) => {
-                        Error(UnterminatedStringLiteral)
+                        ErrCode(UnterminatedStringLiteral)
                     }
                     Lookahead::Character(_) => Continue,
-                    Lookahead::EOF => Error(UnterminatedStringLiteral),
+                    Lookahead::EOF => ErrCode(UnterminatedStringLiteral),
                 }
             }
         })?;
@@ -583,26 +601,37 @@ impl<'input> Tokenizer<'input> {
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
+        let mut errors = ArrayVec::<[OneError; 2]>::new();
+
         let mut last_idx = idx0;
         loop {
             return match self.lookahead {
-                Some((_, '&')) => {
+                Some((idx1, '&')) => {
                     self.bump();
                     let continue_context = self.continuation(idx0)?;
                     if require_continue_context && !continue_context {
-                        self.error(
+                        errors.push(self.one_error(
                             ErrorCode::DiscontinuedCharacterContext,
-                            idx0,
-                            self.lookahead.map_or(self.text_len(), |(i, _)| i),
-                        )
-                    } else {
-                        continue;
+                            idx1,
+                            self.lookahead.map_or(self.text_len(), |x| x.0),
+                        ));
                     }
+
+                    continue;
                 }
                 None => match terminate(Lookahead::EOF) {
                     Continue => panic!("Cannot continue past EOF!"),
-                    Stop => Ok(last_idx + 1),
-                    Error(err_code) => self.error(err_code, idx0, self.text_len() - 1),
+                    Stop => {
+                        if !errors.is_empty() {
+                            Err(Error(errors))
+                        } else {
+                            Ok(last_idx + 1)
+                        }
+                    }
+                    ErrCode(err_code) => {
+                        errors.push(self.one_error(err_code, idx0, self.text_len() - 1));
+                        Err(Error(errors))
+                    }
                 },
                 Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
                     Continue => {
@@ -610,8 +639,17 @@ impl<'input> Tokenizer<'input> {
                         last_idx = idx1;
                         continue;
                     }
-                    Stop => Ok(idx1),
-                    Error(err_code) => self.error(err_code, idx0, idx1),
+                    Stop => {
+                        if !errors.is_empty() {
+                            Err(Error(errors))
+                        } else {
+                            Ok(idx1)
+                        }
+                    }
+                    ErrCode(err_code) => {
+                        errors.push(self.one_error(err_code, idx0, self.text_len() - 1));
+                        Err(Error(errors))
+                    }
                 },
             };
         }
