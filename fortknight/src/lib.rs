@@ -6,6 +6,7 @@ mod index;
 mod intern;
 mod lex;
 mod span;
+mod string;
 
 use data::AnalysisData;
 use error::AnalysisErrorKind;

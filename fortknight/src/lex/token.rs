@@ -1,10 +1,10 @@
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
-use super::{CaseInsensitiveUserStr, UserStr};
 use crate::data::FileData;
 use crate::intern::{InternedName, StringInterner};
 use crate::span::Span;
+use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
@@ -40,10 +40,11 @@ impl Token {
         let span = self.get_internable_span(file_data)?;
 
         Some(InternedName {
-            id: interner
-                .intern_string(CaseInsensitiveUserStr::new(file_data.read_span(&span)).to_string()),
+            id: interner.intern_string(
+                CaseInsensitiveContinuationStr::new(file_data.read_span(&span)).to_string(),
+            ),
             case_sensitive_id: interner
-                .intern_string(UserStr::new(file_data.read_span(&span)).to_string()),
+                .intern_string(ContinuationStr::new(file_data.read_span(&span)).to_string()),
         })
     }
 }

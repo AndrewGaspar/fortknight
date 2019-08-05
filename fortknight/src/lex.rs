@@ -6,6 +6,7 @@ use self::TakeUntil::*;
 
 use crate::index::FileId;
 use crate::span::Span;
+use crate::string::CaseInsensitiveContinuationStr;
 
 #[cfg(test)]
 mod tests;
@@ -60,103 +61,6 @@ enum TakeUntil {
 enum Lookahead {
     Character(char),
     EOF,
-}
-
-#[derive(Clone, Debug)]
-pub struct UserStr<'input> {
-    string: &'input str,
-}
-
-impl<'input> UserStr<'input> {
-    pub fn new(string: &'input str) -> UserStr {
-        debug_assert!(string.is_ascii());
-
-        UserStr { string: string }
-    }
-
-    pub fn iter(&self) -> UserStrIterator<'input> {
-        UserStrIterator::new(self.string.chars())
-    }
-}
-
-impl<'input> PartialEq for UserStr<'input> {
-    fn eq(&self, other: &UserStr) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-
-impl<'input> Eq for UserStr<'input> {}
-
-impl<'input> ToString for UserStr<'input> {
-    fn to_string(&self) -> String {
-        use std::iter::FromIterator;
-        String::from_iter(self.iter())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct UserStrIterator<'input> {
-    str_iter: std::str::Chars<'input>,
-}
-
-impl<'input> UserStrIterator<'input> {
-    fn new(str_iter: std::str::Chars<'input>) -> UserStrIterator<'input> {
-        UserStrIterator { str_iter: str_iter }
-    }
-}
-
-// Iterator over a FortranUserStr. Ignores continuation. This allows us to
-// tokenize the FORTRAN program without allocating any memory.
-impl<'input> Iterator for UserStrIterator<'input> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<char> {
-        // if we're here, we can assume that the string is already a
-        // valid identifier, which means the continuation is properly
-        // terminated. Just continue until we see a closing ampersand.
-        loop {
-            return match self.str_iter.next() {
-                Some(amp) if amp == '&' => {
-                    while '&' != self.str_iter.next().unwrap() {}
-                    continue;
-                }
-                Some(x) => Some(x),
-                None => None,
-            };
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct CaseInsensitiveUserStr<'input> {
-    user_str: UserStr<'input>,
-}
-
-impl<'input> CaseInsensitiveUserStr<'input> {
-    pub fn new(string: &'input str) -> CaseInsensitiveUserStr {
-        CaseInsensitiveUserStr {
-            user_str: UserStr::new(string),
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = char> + 'input {
-        self.user_str.iter().map(|c: char| c.to_ascii_lowercase())
-    }
-}
-
-impl<'input> PartialEq for CaseInsensitiveUserStr<'input> {
-    fn eq(&self, other: &CaseInsensitiveUserStr) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-
-impl<'input> Eq for CaseInsensitiveUserStr<'input> {}
-
-impl<'input> ToString for CaseInsensitiveUserStr<'input> {
-    fn to_string(&self) -> String {
-        use std::iter::FromIterator;
-        String::from_iter(self.iter())
-    }
 }
 
 pub struct Tokenizer<'input> {
@@ -224,11 +128,11 @@ impl<'input> Tokenizer<'input> {
         self.bump();
 
         // don't include . in operator name
-        let operator = CaseInsensitiveUserStr::new(&self.text_span(idx0 + 1, idx1));
+        let operator = CaseInsensitiveContinuationStr::new(&self.text_span(idx0 + 1, idx1));
 
         let kind = INTRINSIC_OPERATORS
             .iter()
-            .filter(|&&(w, _)| CaseInsensitiveUserStr::new(w) == operator)
+            .filter(|&&(w, _)| CaseInsensitiveContinuationStr::new(w) == operator)
             .map(|&(_, ref t)| t.clone())
             .next()
             .unwrap_or_else(|| TokenKind::DefinedOperator);
@@ -242,7 +146,7 @@ impl<'input> Tokenizer<'input> {
             _ => Stop,
         })?;
 
-        let word = CaseInsensitiveUserStr::new(&self.text_span(idx0, idx1));
+        let word = CaseInsensitiveContinuationStr::new(&self.text_span(idx0, idx1));
 
         let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
             TokenKind::Keyword(*kind)
