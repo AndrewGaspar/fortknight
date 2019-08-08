@@ -3,9 +3,12 @@ use std::str::CharIndices;
 
 use arrayvec::ArrayVec;
 
-use self::ErrorCode::*;
 use self::TakeUntil::*;
 
+use crate::error::{
+    Error, OneError,
+    ParserErrorCode::{self, *},
+};
 use crate::index::FileId;
 use crate::span::Span;
 use crate::string::CaseInsensitiveContinuationStr;
@@ -19,56 +22,10 @@ use token::*;
 pub use token::{KeywordTokenKind, Token, TokenKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OneError {
-    pub span: Span,
-    pub code: ErrorCode,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(pub ArrayVec<[OneError; 2]>);
-
-impl From<OneError> for Error {
-    fn from(err: OneError) -> Self {
-        use std::iter::FromIterator;
-
-        Error(ArrayVec::from_iter(std::iter::once(err)))
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ErrorCode {
-    UnrecognizedToken,
-    UnterminatedStringLiteral,
-    UnterminatedOperator,
-    UnterminatedContinuationLine,
-    InvalidCarriageReturn,
-    UnexpectedToken,
-    MissingExponent,
-    DiscontinuedCharacterContext,
-}
-
-impl ErrorCode {
-    pub fn code(self) -> u16 {
-        let code = match self {
-            UnrecognizedToken => 0,
-            UnterminatedStringLiteral => 1,
-            UnterminatedOperator => 2,
-            UnterminatedContinuationLine => 3,
-            InvalidCarriageReturn => 4,
-            UnexpectedToken => 5,
-            MissingExponent => 6,
-            DiscontinuedCharacterContext => 7,
-        };
-        assert!(code < 1000);
-        code
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 enum TakeUntil {
     Continue,
     Stop,
-    ErrCode(ErrorCode),
+    ErrCode(ParserErrorCode),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,7 +77,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn one_error(&self, c: ErrorCode, start: u32, end: u32) -> OneError {
+    fn one_error(&self, c: ParserErrorCode, start: u32, end: u32) -> OneError {
         OneError {
             span: Span {
                 file_id: self.file_id,
@@ -131,7 +88,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn error<T>(&self, c: ErrorCode, start: u32, end: u32) -> Result<T, Error> {
+    fn error<T>(&self, c: ParserErrorCode, start: u32, end: u32) -> Result<T, Error> {
         Err(self.one_error(c, start, end))?
     }
 
@@ -228,7 +185,7 @@ impl<'input> Tokenizer<'input> {
     fn finish_exponent(&mut self, idx0: u32) -> Result<Token, Error> {
         if let Some((_, '+')) | Some((_, '-')) = self.lookahead {
             self.bump();
-            self.expect_continuation(ErrorCode::MissingExponent, idx0)?;
+            self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
         }
 
         match self.lookahead {
@@ -236,8 +193,8 @@ impl<'input> Tokenizer<'input> {
                 let idx1 = self.take_digit_string(idx0)?;
                 Ok(self.token(TokenKind::RealLiteralConstant, idx0, idx1))
             }
-            Some((idx1, _)) => self.error(ErrorCode::MissingExponent, idx0, idx1),
-            None => self.error(ErrorCode::MissingExponent, idx0, self.text_len()),
+            Some((idx1, _)) => self.error(ParserErrorCode::MissingExponent, idx0, idx1),
+            None => self.error(ParserErrorCode::MissingExponent, idx0, self.text_len()),
         }
     }
 
@@ -247,7 +204,7 @@ impl<'input> Tokenizer<'input> {
         match self.lookahead {
             Some((_, c)) if is_exponent_letter(c) => {
                 self.bump();
-                self.expect_continuation(ErrorCode::MissingExponent, idx0)?;
+                self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
 
                 self.finish_exponent(idx0)
             }
@@ -279,7 +236,7 @@ impl<'input> Tokenizer<'input> {
             }
             Some((_, c)) if is_exponent_letter(c) => {
                 self.bump();
-                self.expect_continuation(ErrorCode::MissingExponent, idx0)?;
+                self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
 
                 self.finish_exponent(idx0)
             }
@@ -389,8 +346,8 @@ impl<'input> Tokenizer<'input> {
     }
 
     /// Should be called at any time during tokenization when additional characters are EXPECTED.
-    /// If it's not a token-splitting continuation, the ErrorCode is returned.
-    fn expect_continuation(&mut self, code: ErrorCode, idx0: u32) -> Result<(), Error> {
+    /// If it's not a token-splitting continuation, the ParserErrorCode is returned.
+    fn expect_continuation(&mut self, code: ParserErrorCode, idx0: u32) -> Result<(), Error> {
         let idx1 = match self.lookahead {
             Some((i, _)) => i - 1,
             None => return self.error(code, idx0, self.text_len()),
@@ -611,7 +568,7 @@ impl<'input> Tokenizer<'input> {
                     let continue_context = self.continuation(idx0)?;
                     if require_continue_context && !continue_context {
                         errors.push(self.one_error(
-                            ErrorCode::DiscontinuedCharacterContext,
+                            DiscontinuedCharacterContext,
                             idx1,
                             self.lookahead.map_or(self.text_len(), |x| x.0),
                         ));

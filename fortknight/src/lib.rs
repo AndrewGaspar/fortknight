@@ -1,12 +1,13 @@
 use std::{convert::TryInto, default::Default, path::PathBuf};
 
-mod data;
-mod error;
+mod classifier;
+pub mod data;
+pub mod error;
 mod index;
 mod intern;
 mod lex;
 mod span;
-mod string;
+pub mod string;
 
 use data::AnalysisData;
 use error::AnalysisErrorKind;
@@ -26,7 +27,7 @@ impl AnalysisOptions {}
 /// includes and common module files.
 pub struct AnalysisEngine {
     options: AnalysisOptions,
-    data: AnalysisData,
+    pub data: AnalysisData,
     interner: StringInterner,
 }
 

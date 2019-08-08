@@ -1,7 +1,8 @@
 use std::convert::TryInto;
 use std::path::PathBuf;
 
-use crate::lex::{OneError, Token};
+use crate::error::OneError;
+use crate::lex::Token;
 use crate::span::{LinCol, LinColLocation, LinColSpan, Location, Span};
 
 #[derive(Default)]

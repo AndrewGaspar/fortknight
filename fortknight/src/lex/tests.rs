@@ -1,13 +1,14 @@
 use super::{
     token::{KeywordTokenKind, TokenKind},
-    ErrorCode, Tokenizer,
+    Tokenizer,
 };
+use crate::error::ParserErrorCode;
 use crate::index::FileId;
 
 mod intrinsics;
 mod strings;
 
-pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ErrorCode>> {
+pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ParserErrorCode>> {
     let tokenizer = Tokenizer::new(FileId(0), text);
 
     tokenizer
@@ -123,7 +124,7 @@ fn bad_token() {
     assert_eq!(
         vec![
             Ok(TokenKind::Name),
-            Result::Err(ErrorCode::UnrecognizedToken),
+            Result::Err(ParserErrorCode::UnrecognizedToken),
             Ok(TokenKind::Name)
         ],
         get_tokens("x @ y"),
@@ -224,7 +225,7 @@ fn dots_vs_operators() {
     );
 
     assert_eq!(
-        vec![Err(ErrorCode::UnterminatedOperator)],
+        vec![Err(ParserErrorCode::UnterminatedOperator)],
         get_tokens(".eq")
     );
 
@@ -236,7 +237,7 @@ fn dots_vs_operators() {
 
 #[test]
 fn real_literal_constant() {
-    use ErrorCode::MissingExponent;
+    use ParserErrorCode::MissingExponent;
     use TokenKind::{Plus, RealLiteralConstant};
 
     assert_eq!(vec![RealLiteralConstant], get_tokens_unwrap("1.2"));
