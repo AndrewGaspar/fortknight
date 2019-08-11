@@ -94,11 +94,6 @@ impl AnalysisEngine {
         self.data.file_data.lex_errors.push(lex_errors);
 
         if self.options.print_tokens {
-            let tokenizer =
-                lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
-
-            let tokens: Vec<_> = tokenizer.collect();
-
             println!("Tokens:");
             for t in &self.data.file_data.tokens[file_id.0 as usize] {
                 let location = self
