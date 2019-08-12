@@ -1,11 +1,10 @@
 use std::{convert::TryInto, default::Default, path::PathBuf};
 
-mod classifier;
 pub mod data;
 pub mod error;
 mod index;
 mod intern;
-mod lex;
+mod parser;
 mod span;
 pub mod string;
 
@@ -77,7 +76,7 @@ impl AnalysisEngine {
                 .unwrap(),
         );
 
-        let tokenizer = lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
+        let tokenizer = parser::lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
         let mut tokens = vec![];
         let mut lex_errors = vec![];
         for t in tokenizer {

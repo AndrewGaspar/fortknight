@@ -2,7 +2,7 @@ use std::convert::TryInto;
 use std::path::PathBuf;
 
 use crate::error::OneError;
-use crate::lex::Token;
+use crate::parser::lex::Token;
 use crate::span::{LinCol, LinColLocation, LinColSpan, Location, Span};
 
 #[derive(Default)]

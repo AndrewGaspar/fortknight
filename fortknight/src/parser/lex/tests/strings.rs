@@ -1,7 +1,7 @@
 use crate::error::ParserErrorCode::*;
 use crate::index::FileId;
-use crate::lex::Tokenizer;
-use crate::lex::{tests::get_tokens_unwrap, token::TokenKind::CharLiteralConstant};
+use crate::parser::lex::Tokenizer;
+use crate::parser::lex::{tests::get_tokens_unwrap, token::TokenKind::CharLiteralConstant};
 
 #[test]
 fn empty_string() {

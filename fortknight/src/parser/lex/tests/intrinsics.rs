@@ -1,4 +1,4 @@
-use crate::lex::token::KeywordTokenKind;
+use crate::parser::lex::token::KeywordTokenKind;
 
 #[test]
 fn check_intrinsic_types() {

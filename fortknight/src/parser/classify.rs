@@ -1,9 +1,10 @@
-use crate::lex::Token;
+use super::lex::Tokenizer;
+use crate::parser::lex::Token;
 
 mod statements;
 
 pub struct Classifier<'t> {
-    tokens: &'t [Token],
+    tokenizer: Tokenizer<'t>,
 }
 
 impl<'t> Iterator for Classifier<'t> {
