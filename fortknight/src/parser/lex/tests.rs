@@ -2,27 +2,29 @@ use super::{
     token::{KeywordTokenKind, TokenKind},
     Tokenizer,
 };
-use crate::error::ParserErrorCode;
+use crate::error::DiagnosticSink;
 use crate::index::FileId;
 
 mod intrinsics;
 mod strings;
 
-pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ParserErrorCode>> {
-    let tokenizer = Tokenizer::new(FileId(0), text);
+// pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ParserErrorCode>> {
+//     let sink = DiagnosticSink{};
+//     let tokenizer = Tokenizer::new(FileId(0), text, &sink);
 
-    tokenizer
-        .map(|x| match x {
-            Ok(t) => Ok(t.kind),
-            Err(e) => Err(e.0[0].code),
-        })
-        .collect()
-}
+//     tokenizer
+//         .map(|x| match x {
+//             Ok(t) => Ok(t.kind),
+//             Err(e) => Err(e.0[0].code),
+//         })
+//         .collect()
+// }
 
 pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
-    let tokenizer = Tokenizer::new(FileId(0), text);
+    let mut sink = DiagnosticSink::Raw(Box::new(std::io::sink()));
+    let tokenizer = Tokenizer::new(FileId(0), text, &mut sink);
 
-    tokenizer.map(|x| x.unwrap().kind).collect()
+    tokenizer.map(|x| x.kind).collect()
 }
 
 #[test]
@@ -123,11 +125,13 @@ e&
 fn bad_token() {
     assert_eq!(
         vec![
-            Ok(TokenKind::Name),
-            Result::Err(ParserErrorCode::UnrecognizedToken),
-            Ok(TokenKind::Name)
+            TokenKind::Name,
+            TokenKind::Unknown,
+            // Result::Err(ParserErrorCode::UnrecognizedToken),
+            TokenKind::Name,
         ],
-        get_tokens("x @ y"),
+        get_tokens_unwrap("x @ y"),
+        // get_tokens("x @ y"),
     );
 }
 
@@ -225,8 +229,9 @@ fn dots_vs_operators() {
     );
 
     assert_eq!(
-        vec![Err(ParserErrorCode::UnterminatedOperator)],
-        get_tokens(".eq")
+        // vec![Err(ParserErrorCode::UnterminatedOperator)],
+        vec![TokenKind::Unknown],
+        get_tokens_unwrap(".eq"),
     );
 
     assert_eq!(
@@ -237,7 +242,6 @@ fn dots_vs_operators() {
 
 #[test]
 fn real_literal_constant() {
-    use ParserErrorCode::MissingExponent;
     use TokenKind::{Plus, RealLiteralConstant};
 
     assert_eq!(vec![RealLiteralConstant], get_tokens_unwrap("1.2"));
@@ -255,9 +259,15 @@ fn real_literal_constant() {
         get_tokens_unwrap("+19.52E-78")
     );
 
-    assert_eq!(Err(MissingExponent), get_tokens("1.E--78")[0]);
-    assert_eq!(Err(MissingExponent), get_tokens(".0E")[0]);
-    assert_eq!(Err(MissingExponent), get_tokens(".0Ea")[0]);
-    assert_eq!(Err(MissingExponent), get_tokens(".0E+-9")[0]);
-    assert_eq!(Err(MissingExponent), get_tokens("100.0d")[0]);
+    // assert_eq!(Err(MissingExponent), get_tokens("1.E--78")[0]);
+    // assert_eq!(Err(MissingExponent), get_tokens(".0E")[0]);
+    // assert_eq!(Err(MissingExponent), get_tokens(".0Ea")[0]);
+    // assert_eq!(Err(MissingExponent), get_tokens(".0E+-9")[0]);
+    // assert_eq!(Err(MissingExponent), get_tokens("100.0d")[0]);
+
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("1.E--78")[0]);
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap(".0E")[0]);
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap(".0Ea")[0]);
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap(".0E+-9")[0]);
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("100.0d")[0]);
 }

@@ -103,6 +103,9 @@ pub enum TokenKind {
     RightParen,
     LeftBracket,
     RightBracket,
+
+    // Returned when an unknown token is encountered
+    Unknown,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]

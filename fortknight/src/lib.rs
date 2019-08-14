@@ -9,7 +9,7 @@ mod span;
 pub mod string;
 
 use data::AnalysisData;
-use error::AnalysisErrorKind;
+use error::{AnalysisErrorKind, DiagnosticSink};
 use intern::StringInterner;
 
 /// Options configuring the AnalysisEngine
@@ -27,7 +27,8 @@ impl AnalysisOptions {}
 pub struct AnalysisEngine {
     options: AnalysisOptions,
     pub data: AnalysisData,
-    interner: StringInterner,
+    pub diagnostics: DiagnosticSink,
+    _interner: StringInterner,
 }
 
 impl AnalysisEngine {
@@ -35,7 +36,8 @@ impl AnalysisEngine {
         let mut engine = Self {
             options,
             data: AnalysisData::default(),
-            interner: StringInterner::new(),
+            diagnostics: DiagnosticSink::from_stderr(),
+            _interner: StringInterner::new(),
         };
 
         for path in engine.options.files.iter().cloned().collect::<Vec<_>>() {
@@ -76,21 +78,12 @@ impl AnalysisEngine {
                 .unwrap(),
         );
 
-        let tokenizer = parser::lex::Tokenizer::new(file_id, &self.data.file_data.contents.last().unwrap());
-        let mut tokens = vec![];
-        let mut lex_errors = vec![];
-        for t in tokenizer {
-            match t {
-                Ok(token) => tokens.push(token),
-                Err(err) => {
-                    for e in err.0 {
-                        lex_errors.push(e);
-                    }
-                }
-            }
-        }
-        self.data.file_data.tokens.push(tokens);
-        self.data.file_data.lex_errors.push(lex_errors);
+        let tokenizer = parser::lex::Tokenizer::new(
+            file_id,
+            &self.data.file_data.contents.last().unwrap(),
+            &mut self.diagnostics,
+        );
+        self.data.file_data.tokens.push(tokenizer.collect());
 
         if self.options.print_tokens {
             println!("Tokens:");
@@ -103,16 +96,6 @@ impl AnalysisEngine {
                 println!("\t{:>23?} {}", t.kind, location);
             }
             println!();
-
-            eprintln!("Errors:");
-            for e in &self.data.file_data.lex_errors[file_id.0 as usize] {
-                let location = self
-                    .data
-                    .file_data
-                    .display_location(&self.data.file_data.get_lin_col(&e.span.start_location()));
-
-                eprintln!("\t{:>23?} {}", e.code, location);
-            }
         }
 
         Ok(())

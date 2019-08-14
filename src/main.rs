@@ -1,12 +1,8 @@
 use std::default::Default;
 use std::error::Error;
-use std::io::Write;
 
 use clap::Arg;
-use fortknight::error::ParserErrorCode;
-use fortknight::string::ContinuationStr;
 use fortknight::{AnalysisEngine, AnalysisOptions};
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 const FILES: &'static str = "files";
 const PRINT_TOKENS: &'static str = "print_tokens";
@@ -34,38 +30,7 @@ fn main() -> Result<(), Box<Error>> {
     options.files = files;
     options.print_tokens = matches.is_present(PRINT_TOKENS);
 
-    let engine = AnalysisEngine::new(options);
-    for file in 0..engine.data.file_data.file_names.len() {
-        let mut stderr = StandardStream::stderr(ColorChoice::Always);
-        if engine.data.file_data.lex_errors[file].len() > 0 {
-            for err in &engine.data.file_data.lex_errors[file] {
-                use ParserErrorCode::*;
-
-                stderr.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_intense(true))?;
-                write!(&mut stderr, "error")?;
-                stderr.set_color(
-                    ColorSpec::new()
-                        .set_fg(Some(Color::White))
-                        .set_intense(true),
-                )?;
-
-                write!(&mut stderr, ": ")?;
-
-                let text = ContinuationStr::new(engine.data.file_data.read_span(&err.span));
-                match err.code {
-                    UnrecognizedToken => write!(
-                        stderr,
-                        "`{}` is not a valid lexical token in Fortran",
-                        text.to_string()
-                    )?,
-                    _ => {}
-                }
-                writeln!(stderr)?;
-
-                stderr.reset()?;
-            }
-        }
-    }
+    let _engine = AnalysisEngine::new(options);
 
     Ok(())
 }

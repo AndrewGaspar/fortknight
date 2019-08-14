@@ -1,17 +1,15 @@
 use std::iter::Iterator;
 use std::str::CharIndices;
 
-use arrayvec::ArrayVec;
-
 use self::TakeUntil::*;
 
 use crate::error::{
-    Error, OneError,
+    AnalysisErrorKind, DiagnosticSink,
     ParserErrorCode::{self, *},
 };
 use crate::index::FileId;
 use crate::span::Span;
-use crate::string::CaseInsensitiveContinuationStr;
+use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 
 #[cfg(test)]
 mod tests;
@@ -25,24 +23,29 @@ pub use token::{KeywordTokenKind, Token, TokenKind};
 enum TakeUntil {
     Continue,
     Stop,
-    ErrCode(ParserErrorCode),
+    Abort,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Lookahead {
-    Character(char),
+    Character(u32, char),
     EOF,
 }
 
 pub struct Tokenizer<'input> {
     file_id: FileId,
     text: &'input str,
+    diagnostics: &'input mut DiagnosticSink,
     chars: CharIndices<'input>,
-    lookahead: Option<(u32, char)>,
+    lookahead: Lookahead,
 }
 
 impl<'input> Tokenizer<'input> {
-    pub fn new(file_id: FileId, text: &'input str) -> Tokenizer<'input> {
+    pub fn new(
+        file_id: FileId,
+        text: &'input str,
+        diagnostics: &'input mut DiagnosticSink,
+    ) -> Tokenizer<'input> {
         assert!(
             text.len() <= u32::max_value() as usize,
             "Fortknight only supports a maximum of 4GB files."
@@ -50,12 +53,41 @@ impl<'input> Tokenizer<'input> {
 
         let mut t = Tokenizer {
             file_id,
-            text: text,
+            text,
+            diagnostics,
             chars: text.char_indices(),
-            lookahead: None,
+            lookahead: Lookahead::EOF,
         };
         t.bump();
         t
+    }
+
+    fn lookahead_idx(&self, lookahead: Lookahead) -> u32 {
+        match lookahead {
+            Lookahead::Character(idx, _) => idx,
+            Lookahead::EOF => self.text_len(),
+        }
+    }
+
+    fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
+        self.diagnostics.emit_error_from_contents(
+            &self.text,
+            AnalysisErrorKind::Parser(err),
+            span,
+            msg,
+        )
+    }
+
+    fn emit_error(&mut self, err: ParserErrorCode, start: u32, end: u32, msg: &str) {
+        self.emit_error_span(
+            err,
+            Span {
+                file_id: self.file_id,
+                start,
+                end,
+            },
+            msg,
+        )
     }
 
     fn text_span(&self, start: u32, end: u32) -> &str {
@@ -77,27 +109,28 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn one_error(&self, c: ParserErrorCode, start: u32, end: u32) -> OneError {
-        OneError {
-            span: Span {
-                file_id: self.file_id,
-                start,
-                end,
-            },
-            code: c,
-        }
-    }
+    fn operator(&mut self, idx0: u32) -> Token {
+        let maybe_idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
+            Lookahead::Character(_, c) if is_operator_continue(c) => Continue,
+            Lookahead::Character(_, '.') => Stop,
+            _ => Abort,
+        });
 
-    fn error<T>(&self, c: ParserErrorCode, start: u32, end: u32) -> Result<T, Error> {
-        Err(self.one_error(c, start, end))?
-    }
-
-    fn operator(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
-            Lookahead::Character(c) if is_operator_continue(c) => Continue,
-            Lookahead::Character('.') => Stop,
-            _ => ErrCode(UnterminatedOperator),
-        })?;
+        let idx1 = match maybe_idx1 {
+            Ok(idx1) => idx1,
+            Err(idx1) => {
+                self.emit_error(
+                    UnterminatedOperator,
+                    idx0,
+                    idx1,
+                    &format!(
+                        "Expected `{}` to be an operator.",
+                        ContinuationStr::new(self.text_span(idx0, idx1))
+                    ),
+                );
+                return self.token(TokenKind::Unknown, idx0, idx1);
+            }
+        };
 
         // consume .
         self.bump();
@@ -110,16 +143,18 @@ impl<'input> Tokenizer<'input> {
             .filter(|&&(w, _)| CaseInsensitiveContinuationStr::new(w) == operator)
             .map(|&(_, ref t)| t.clone())
             .next()
-            .unwrap_or_else(|| TokenKind::DefinedOperator);
+            .unwrap_or(TokenKind::DefinedOperator);
 
-        Ok(self.token(kind, idx0, idx1 + 1))
+        self.token(kind, idx0, idx1 + 1)
     }
 
-    fn identifierish(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
-            Lookahead::Character(c) if is_identifier_continue(c) => Continue,
-            _ => Stop,
-        })?;
+    fn identifierish(&mut self, idx0: u32) -> Token {
+        let idx1 = self
+            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+                Lookahead::Character(_, c) if is_identifier_continue(c) => Continue,
+                _ => Stop,
+            })
+            .expect("Internal error: identifier tokens always terminate");
 
         let word = CaseInsensitiveContinuationStr::new(&self.text_span(idx0, idx1));
 
@@ -129,204 +164,302 @@ impl<'input> Tokenizer<'input> {
             TokenKind::Name
         };
 
-        Ok(self.token(kind, idx0, idx1))
+        self.token(kind, idx0, idx1)
     }
 
-    fn unrecognized_token(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
-            Lookahead::Character(c) if c.is_whitespace() => Stop,
-            Lookahead::EOF => Stop,
-            _ => Continue,
-        })?;
+    fn unrecognized_token(&mut self, idx0: u32) -> Token {
+        let idx1 = self
+            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+                Lookahead::Character(_, c) if is_recognized_character(c) => Stop,
+                Lookahead::EOF => Stop,
+                _ => Continue,
+            })
+            .unwrap_or(self.text_len());
 
-        self.error(UnrecognizedToken, idx0, idx1)
+        self.emit_error(
+            UnrecognizedToken,
+            idx0,
+            idx1,
+            &format!(
+                "`{}` is not a valid lexical token in Fortran",
+                ContinuationStr::new(&self.text_span(idx0, idx1))
+            ),
+        );
+
+        self.token(TokenKind::Unknown, idx0, idx1)
     }
 
-    fn string_literal(&mut self, idx0: u32, quote: char) -> Result<Token, Error> {
+    fn string_literal(&mut self, idx0: u32, quote: char) -> Token {
         let mut saw_closing_quote = false;
 
         // TODO: Add optional, non-standard support for escape sequences. See gfortran
         // -fbackslash option
         // See: https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
-        let idx1 = self.take_until_terminate(idx0, true, |lookahead: Lookahead| {
+        let maybe_idx1 = self.take_until_terminate(idx0, true, |lookahead: Lookahead| {
             if saw_closing_quote {
                 match lookahead {
-                    Lookahead::Character(c) if c == quote => {
+                    Lookahead::Character(_, c) if c == quote => {
                         saw_closing_quote = false;
                         Continue
                     }
-                    Lookahead::Character(_) | Lookahead::EOF => Stop,
+                    Lookahead::Character(_, _) | Lookahead::EOF => Stop,
                 }
             } else {
                 match lookahead {
-                    Lookahead::Character(c) if c == quote => {
+                    Lookahead::Character(_, c) if c == quote => {
                         saw_closing_quote = true;
                         Continue
                     }
-                    Lookahead::Character(c) if is_new_line_start(c) => {
-                        ErrCode(UnterminatedStringLiteral)
-                    }
-                    Lookahead::Character(_) => Continue,
-                    Lookahead::EOF => ErrCode(UnterminatedStringLiteral),
+                    Lookahead::Character(_, c) if is_new_line_start(c) => Abort,
+                    Lookahead::Character(_, _) => Continue,
+                    Lookahead::EOF => Abort,
                 }
             }
-        })?;
+        });
 
-        Ok(self.token(TokenKind::CharLiteralConstant, idx0, idx1))
+        let idx1 = match maybe_idx1 {
+            Ok(idx1) => idx1,
+            Err(idx1) => {
+                self.emit_error(
+                    UnterminatedStringLiteral,
+                    idx0,
+                    idx1,
+                    "Missing closing quote for string literal",
+                );
+                return self.token(TokenKind::Unknown, idx0, idx1);
+            }
+        };
+
+        self.token(TokenKind::CharLiteralConstant, idx0, idx1)
     }
 
-    fn take_digit_string(&mut self, idx0: u32) -> Result<u32, Error> {
+    fn take_digit_string(&mut self, idx0: u32) -> u32 {
         self.take_until(idx0, |lookahead: Lookahead| match lookahead {
-            Lookahead::Character(c) if is_digit(c) => Continue,
+            Lookahead::Character(_, c) if is_digit(c) => Continue,
             _ => Stop,
         })
+        .expect("Internal compiler error: Did not expect abort when taking a digit string")
     }
 
-    fn finish_exponent(&mut self, idx0: u32) -> Result<Token, Error> {
-        if let Some((_, '+')) | Some((_, '-')) = self.lookahead {
+    fn finish_exponent(&mut self, idx0: u32) -> Token {
+        if let Lookahead::Character(idx1, '+') | Lookahead::Character(idx1, '-') = self.lookahead {
             self.bump();
-            self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
+            if !self.skip_continuation() {
+                self.emit_error(
+                    MissingExponent,
+                    idx0,
+                    idx1,
+                    &format!("Real literal constant has incomplete exponent part"),
+                );
+                return self.token(TokenKind::Unknown, idx0, idx1);
+            }
         }
 
         match self.lookahead {
-            Some((_, c)) if is_digit(c) => {
-                let idx1 = self.take_digit_string(idx0)?;
-                Ok(self.token(TokenKind::RealLiteralConstant, idx0, idx1))
+            Lookahead::Character(_, c) if is_digit(c) => {
+                let idx1 = self.take_digit_string(idx0);
+                self.token(TokenKind::RealLiteralConstant, idx0, idx1)
             }
-            Some((idx1, _)) => self.error(ParserErrorCode::MissingExponent, idx0, idx1),
-            None => self.error(ParserErrorCode::MissingExponent, idx0, self.text_len()),
+            lookahead => {
+                self.emit_error(
+                    MissingExponent,
+                    idx0,
+                    self.lookahead_idx(lookahead),
+                    "Real literal constant has an exponent letter but no exponent",
+                );
+                self.token(TokenKind::Unknown, idx0, self.lookahead_idx(lookahead))
+            }
         }
     }
 
-    fn finish_real_literal_constant(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_digit_string(idx0)?;
-
+    fn finish_real_literal_constant(&mut self, idx0: u32) -> Token {
         match self.lookahead {
-            Some((_, c)) if is_exponent_letter(c) => {
+            Lookahead::Character(idx1, c) if is_exponent_letter(c) => {
                 self.bump();
-                self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
-
-                self.finish_exponent(idx0)
+                if !self.skip_continuation() {
+                    self.emit_error(
+                        MissingExponent,
+                        idx0,
+                        idx1,
+                        "Real literal constant has incomplete exponent part",
+                    );
+                    self.token(TokenKind::Unknown, idx0, idx1)
+                } else {
+                    self.finish_exponent(idx0)
+                }
             }
-            _ => Ok(self.token(TokenKind::RealLiteralConstant, idx0, idx1)),
+            lookahead => self.token(
+                TokenKind::RealLiteralConstant,
+                idx0,
+                self.lookahead_idx(lookahead),
+            ),
         }
     }
 
-    fn numberish(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_digit_string(idx0)?;
+    fn decimal(&mut self, idx0: u32) -> Token {
+        debug_assert!(match self.lookahead {
+            Lookahead::Character(_, c) if is_digit(c) => true,
+            _ => false,
+        });
+
+        let idx1 = self.take_digit_string(idx0);
+        debug_assert_ne!(idx1, idx0);
+
+        self.finish_real_literal_constant(idx0)
+    }
+
+    fn numberish(&mut self, idx0: u32) -> Token {
+        let idx1 = self.take_digit_string(idx0);
 
         match self.lookahead {
-            Some((_, '.')) => {
+            Lookahead::Character(idx1, '.') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::RealLiteralConstant, idx0, idx1))
+                if !self.skip_continuation() {
+                    self.token(TokenKind::RealLiteralConstant, idx0, idx1)
                 } else {
                     match self.lookahead {
-                        Some((_, c)) if is_digit(c) || is_exponent_letter(c) => {
+                        Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
+                        Lookahead::Character(_, c) if is_exponent_letter(c) => {
                             self.finish_real_literal_constant(idx0)
                         }
-                        Some((idx1, _)) => {
-                            Ok(self.token(TokenKind::RealLiteralConstant, idx0, idx1))
+                        Lookahead::Character(idx1, _) => {
+                            self.token(TokenKind::RealLiteralConstant, idx0, idx1)
                         }
-                        None => {
-                            Ok(self.token(TokenKind::RealLiteralConstant, idx0, self.text_len()))
+                        Lookahead::EOF => {
+                            self.token(TokenKind::RealLiteralConstant, idx0, self.text_len())
                         }
                     }
                 }
             }
-            Some((_, c)) if is_exponent_letter(c) => {
+            Lookahead::Character(idx1, c) if is_exponent_letter(c) => {
                 self.bump();
-                self.expect_continuation(ParserErrorCode::MissingExponent, idx0)?;
-
-                self.finish_exponent(idx0)
+                if !self.skip_continuation() {
+                    self.emit_error(
+                        MissingExponent,
+                        idx0,
+                        idx1,
+                        "Real literal constant has incomplete exponent part",
+                    );
+                    self.token(TokenKind::Unknown, idx0, idx1)
+                } else {
+                    self.finish_exponent(idx0)
+                }
             }
-            _ => Ok(self.token(TokenKind::DigitString, idx0, idx1)),
+            _ => self.token(TokenKind::DigitString, idx0, idx1),
         }
     }
 
     // expected that last seen character was '!'
     // returns nothing - merely advances to end of comment.
-    fn commentary(&mut self, idx0: u32) -> Result<Token, Error> {
-        let idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
-            Lookahead::Character(c) if is_new_line_start(c) => Stop,
-            Lookahead::EOF => Stop,
-            _ => Continue,
-        })?;
+    fn commentary(&mut self, idx0: u32) -> Token {
+        let idx1 = self
+            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+                Lookahead::Character(_, c) if is_new_line_start(c) => Stop,
+                Lookahead::EOF => Stop,
+                _ => Continue,
+            })
+            .expect("Internal compiler error: Commentary never fails to terminate");
 
-        // skip the newline for commentary - commentary can be considered EOL
+        // ignore the newline for commentary - commentary can be considered EOL
         match self.lookahead {
-            Some((_, c)) if is_new_line_start(c) => {
-                self.consume_new_line().unwrap()?;
+            Lookahead::Character(_, c) if is_new_line_start(c) => {
+                self.consume_new_line();
             }
             _ => {}
         }
 
-        Ok(self.token(TokenKind::Commentary, idx0, idx1))
+        self.token(TokenKind::Commentary, idx0, idx1)
     }
 
     // call when you want to consume a new-line token. Test if at the start of
     // a new line with is_new_line_start.
-    fn consume_new_line(&mut self) -> Option<Result<Token, Error>> {
+    fn consume_new_line(&mut self) -> Token {
         loop {
             return match self.lookahead {
-                Some((idx0, '\n')) => {
+                Lookahead::Character(idx0, '\n') => {
                     self.bump();
-                    Some(Ok(self.token(TokenKind::NewLine, idx0, idx0 + 1)))
+                    self.token(TokenKind::NewLine, idx0, idx0 + 1)
                 }
-                Some((idx0, '\r')) => {
+                Lookahead::Character(idx0, '\r') => {
                     match self.bump() {
-                        Some((_, '\n')) => {
+                        Lookahead::Character(_, '\n') => {
                             self.bump();
-                            Some(Ok(self.token(TokenKind::NewLine, idx0, idx0 + 2)))
+                            self.token(TokenKind::NewLine, idx0, idx0 + 2)
                         }
                         // CR is not a supported line ending
-                        _ => Some(self.error(InvalidCarriageReturn, idx0, idx0 + 1)),
+                        _ => {
+                            self.emit_error(
+                                InvalidCarriageReturn,
+                                idx0,
+                                idx0 + 1,
+                                "CR is not a valid line ending. Only CRLF and LF are supported.",
+                            );
+                            // But still act like it is so we can at least progress.
+                            self.token(TokenKind::NewLine, idx0, idx0 + 1)
+                        }
                     }
                 }
-                Some((_, _)) => panic!("self.lookahead must match a new line start"),
-                None => None,
+                _ => panic!("self.lookahead must match a new line start"),
             };
         }
     }
 
-    fn continuation(&mut self, idx0: u32) -> Result<bool, Error> {
+    fn continuation(&mut self, idx0: u32) -> bool {
         let mut first_line = true;
 
         loop {
             return match self.lookahead {
-                Some((idx0, '!')) => {
+                Lookahead::Character(idx0, '!') => {
                     self.bump();
-                    self.commentary(idx0)
-                        .expect("Internal error: Unexpected error parsing commentary");
+                    self.commentary(idx0);
                     continue;
                 }
-                Some((_, c)) if is_new_line_start(c) => {
+                Lookahead::Character(_, c) if is_new_line_start(c) => {
                     first_line = false;
-                    match self.consume_new_line() {
-                        // propagate errors
-                        Some(Err(err)) => Err(err),
-                        // discard newline token inside of continuation.
-                        // EOF ends continuation
-                        Some(Ok(_)) | None => continue,
-                    }
+                    self.consume_new_line();
+                    continue;
                 }
-                Some((_, s)) if s.is_whitespace() => {
+                Lookahead::Character(_, s) if s.is_whitespace() => {
                     self.bump();
                     continue;
                 }
-                // TODO: Read until end of token, log error, continue
-                Some((idx1, _)) if first_line => self.error(UnexpectedToken, idx1, idx1 + 1),
+                Lookahead::Character(idx0, _) if first_line => {
+                    self.bump();
+                    let idx1 = loop {
+                        match self.bump() {
+                            Lookahead::Character(idx1, '!') => break idx1,
+                            Lookahead::Character(idx1, c) if is_new_line_start(c) => break idx1,
+                            Lookahead::EOF => break self.text_len(),
+                            _ => continue,
+                        }
+                    };
+
+                    self.emit_error(
+                        UnexpectedPostContinuationCharacter, idx0, idx1,
+                        "Nothing may follow a line continuation besides commentary, whitespace, or \
+                        a newline");
+                    continue;
+                }
                 // If an & is encountered, we're done processing the
                 // continuation. The caller should continue whatever
                 // tokenization process it was previously performing.
-                Some((_, '&')) => {
+                Lookahead::Character(_, '&') => {
                     self.bump();
-                    Ok(true)
+                    true
                 }
                 // If a new token is encountered, then the continuation has
                 // ended. The new character is a new token.
-                Some(_) => Ok(false),
-                None => self.error(UnterminatedContinuationLine, idx0, self.text_len()),
+                Lookahead::Character(_, _) => false,
+                // Treat an unterminated continuation as one that does not continue a token
+                Lookahead::EOF => {
+                    self.emit_error(
+                        UnterminatedContinuationLine,
+                        idx0,
+                        self.text_len(),
+                        "Line continuation terminated by end of file",
+                    );
+                    false
+                }
             };
         }
     }
@@ -336,175 +469,160 @@ impl<'input> Tokenizer<'input> {
     ///
     /// Returns None if continuation is skipped without issue. Return Some(err)
     /// if there was an issue in the continuation.
-    fn skip_continuation(&mut self) -> Result<bool, Error> {
-        if let Some((idx0, '&')) = self.lookahead {
+    fn skip_continuation(&mut self) -> bool {
+        if let Lookahead::Character(idx0, '&') = self.lookahead {
             self.bump();
             self.continuation(idx0)
         } else {
-            Ok(true)
+            true
         }
     }
 
-    /// Should be called at any time during tokenization when additional characters are EXPECTED.
-    /// If it's not a token-splitting continuation, the ParserErrorCode is returned.
-    fn expect_continuation(&mut self, code: ParserErrorCode, idx0: u32) -> Result<(), Error> {
-        let idx1 = match self.lookahead {
-            Some((i, _)) => i - 1,
-            None => return self.error(code, idx0, self.text_len()),
-        };
-
-        if self.skip_continuation()? {
-            Ok(())
-        } else {
-            self.error(code, idx0, idx1)
-        }
-    }
-
-    fn get_next(&mut self, lookahead: (u32, char)) -> Result<Token, Error> {
+    fn get_next(&mut self, lookahead: (u32, char)) -> Token {
         match lookahead {
             (idx0, '=') => {
                 self.bump();
 
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::Equals, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    self.token(TokenKind::Equals, idx0, idx0 + 1)
                 } else {
                     match self.lookahead {
-                        Some((idx1, '>')) => {
+                        Lookahead::Character(idx1, '>') => {
                             self.bump();
-                            Ok(self.token(TokenKind::Arrow, idx0, idx1 + 1))
+                            self.token(TokenKind::Arrow, idx0, idx1 + 1)
                         }
-                        Some((idx1, '=')) => {
+                        Lookahead::Character(idx1, '=') => {
                             self.bump();
-                            Ok(self.token(TokenKind::EqualsEquals, idx0, idx1 + 1))
+                            self.token(TokenKind::EqualsEquals, idx0, idx1 + 1)
                         }
-                        _ => Ok(self.token(TokenKind::Equals, idx0, idx0 + 1)),
+                        _ => self.token(TokenKind::Equals, idx0, idx0 + 1),
                     }
                 }
             }
             (idx0, '+') => {
                 self.bump();
-                Ok(self.token(TokenKind::Plus, idx0, idx0 + 1))
+                self.token(TokenKind::Plus, idx0, idx0 + 1)
             }
             (idx0, '-') => {
                 self.bump();
-                Ok(self.token(TokenKind::Minus, idx0, idx0 + 1))
+                self.token(TokenKind::Minus, idx0, idx0 + 1)
             }
             (idx0, '*') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::Star, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    self.token(TokenKind::Star, idx0, idx0 + 1)
                 } else {
                     match self.lookahead {
-                        Some((idx1, '*')) => {
+                        Lookahead::Character(idx1, '*') => {
                             self.bump();
-                            Ok(self.token(TokenKind::StarStar, idx0, idx1 + 1))
+                            self.token(TokenKind::StarStar, idx0, idx1 + 1)
                         }
-                        _ => Ok(self.token(TokenKind::Star, idx0, idx0 + 1)),
+                        _ => self.token(TokenKind::Star, idx0, idx0 + 1),
                     }
                 }
             }
             (idx0, '/') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::Slash, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    self.token(TokenKind::Slash, idx0, idx0 + 1)
                 } else {
                     match self.lookahead {
-                        Some((idx1, '/')) => {
+                        Lookahead::Character(idx1, '/') => {
                             self.bump();
-                            Ok(self.token(TokenKind::SlashSlash, idx0, idx1 + 1))
+                            self.token(TokenKind::SlashSlash, idx0, idx1 + 1)
                         }
-                        Some((idx1, '=')) => {
+                        Lookahead::Character(idx1, '=') => {
                             self.bump();
-                            Ok(self.token(TokenKind::SlashEquals, idx0, idx1 + 1))
+                            self.token(TokenKind::SlashEquals, idx0, idx1 + 1)
                         }
-                        _ => Ok(self.token(TokenKind::Slash, idx0, idx0 + 1)),
+                        _ => self.token(TokenKind::Slash, idx0, idx0 + 1),
                     }
                 }
             }
             (idx0, '%') => {
                 self.bump();
-                Ok(self.token(TokenKind::Percent, idx0, idx0 + 1))
+                (self.token(TokenKind::Percent, idx0, idx0 + 1))
             }
             (idx0, '(') => {
                 self.bump();
-                Ok(self.token(TokenKind::LeftParen, idx0, idx0 + 1))
+                (self.token(TokenKind::LeftParen, idx0, idx0 + 1))
             }
             (idx0, ')') => {
                 self.bump();
-                Ok(self.token(TokenKind::RightParen, idx0, idx0 + 1))
+                (self.token(TokenKind::RightParen, idx0, idx0 + 1))
             }
             (idx0, '[') => {
                 self.bump();
-                Ok(self.token(TokenKind::LeftBracket, idx0, idx0 + 1))
+                (self.token(TokenKind::LeftBracket, idx0, idx0 + 1))
             }
             (idx0, ']') => {
                 self.bump();
-                Ok(self.token(TokenKind::RightBracket, idx0, idx0 + 1))
+                (self.token(TokenKind::RightBracket, idx0, idx0 + 1))
             }
             (idx0, '<') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::LeftAngle, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    (self.token(TokenKind::LeftAngle, idx0, idx0 + 1))
                 } else {
                     match self.lookahead {
-                        Some((idx1, '=')) => {
+                        Lookahead::Character(idx1, '=') => {
                             self.bump();
-                            Ok(self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
+                            (self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
                         }
-                        _ => Ok(self.token(TokenKind::LeftAngle, idx0, idx0 + 1)),
+                        _ => (self.token(TokenKind::LeftAngle, idx0, idx0 + 1)),
                     }
                 }
             }
             (idx0, '>') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::RightAngle, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    (self.token(TokenKind::RightAngle, idx0, idx0 + 1))
                 } else {
                     match self.lookahead {
-                        Some((idx1, '=')) => {
+                        Lookahead::Character(idx1, '=') => {
                             self.bump();
-                            Ok(self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
+                            (self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
                         }
-                        _ => Ok(self.token(TokenKind::RightAngle, idx0, idx0 + 1)),
+                        _ => (self.token(TokenKind::RightAngle, idx0, idx0 + 1)),
                     }
                 }
             }
             (idx0, '.') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::Dot, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    (self.token(TokenKind::Dot, idx0, idx0 + 1))
                 } else {
                     match self.lookahead {
                         // if followed by a letter, then this must be an operator
-                        Some((_, c)) if is_letter(c) => self.operator(idx0),
-                        // If followed by a digit, then this must be an operator
-                        Some((_, c)) if is_digit(c) => self.finish_real_literal_constant(idx0),
+                        Lookahead::Character(_, c) if is_letter(c) => self.operator(idx0),
+                        // If followed by a digit, then this must be an real literal constant
+                        Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
                         // else just return the dot token
-                        _ => Ok(self.token(TokenKind::Dot, idx0, idx0 + 1)),
+                        _ => (self.token(TokenKind::Dot, idx0, idx0 + 1)),
                     }
                 }
             }
             (idx0, ',') => {
                 self.bump();
-                Ok(self.token(TokenKind::Comma, idx0, idx0 + 1))
+                (self.token(TokenKind::Comma, idx0, idx0 + 1))
             }
             (idx0, ':') => {
                 self.bump();
-                if !self.skip_continuation()? {
-                    Ok(self.token(TokenKind::Colon, idx0, idx0 + 1))
+                if !self.skip_continuation() {
+                    (self.token(TokenKind::Colon, idx0, idx0 + 1))
                 } else {
                     match self.lookahead {
-                        Some((idx1, ':')) => {
+                        Lookahead::Character(idx1, ':') => {
                             self.bump();
-                            Ok(self.token(TokenKind::ColonColon, idx0, idx1 + 1))
+                            (self.token(TokenKind::ColonColon, idx0, idx1 + 1))
                         }
-                        _ => Ok(self.token(TokenKind::Colon, idx0, idx0 + 1)),
+                        _ => (self.token(TokenKind::Colon, idx0, idx0 + 1)),
                     }
                 }
             }
             (idx0, ';') => {
                 self.bump();
-                Ok(self.token(TokenKind::SemiColon, idx0, idx0 + 1))
+                (self.token(TokenKind::SemiColon, idx0, idx0 + 1))
             }
             (idx0, c) if (c == '"' || c == '\'') => {
                 self.bump();
@@ -516,11 +634,11 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '!') => {
                 self.bump();
-                self.commentary(idx0)
+                (self.commentary(idx0))
             }
             (idx0, c) if is_identifier_start(c) => {
                 self.bump();
-                self.identifierish(idx0)
+                (self.identifierish(idx0))
             }
             (idx, _) => {
                 self.bump();
@@ -529,22 +647,20 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn internal_next(&mut self) -> Option<Result<Token, Error>> {
+    fn internal_next(&mut self) -> Option<Token> {
         loop {
             return match self.lookahead {
-                Some((_, '&')) => {
-                    if let Err(e) = self.skip_continuation() {
-                        return Some(Err(e));
-                    }
+                Lookahead::Character(_, '&') => {
+                    self.skip_continuation();
                     continue;
                 }
-                Some((_, c)) if is_new_line_start(c) => self.consume_new_line(),
-                Some((_, c)) if c.is_whitespace() => {
+                Lookahead::Character(_, c) if is_new_line_start(c) => Some(self.consume_new_line()),
+                Lookahead::Character(_, c) if c.is_whitespace() => {
                     self.bump();
                     continue;
                 }
-                Some(l) => Some(self.get_next(l)),
-                None => None,
+                Lookahead::Character(idx, c) => Some(self.get_next((idx, c))),
+                Lookahead::EOF => None,
             };
         }
     }
@@ -554,81 +670,64 @@ impl<'input> Tokenizer<'input> {
         idx0: u32,
         require_continue_context: bool,
         mut terminate: F,
-    ) -> Result<u32, Error>
+    ) -> Result<u32, u32>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
-        let mut errors = ArrayVec::<[OneError; 2]>::new();
-
-        let mut last_idx = idx0;
         loop {
             return match self.lookahead {
-                Some((idx1, '&')) => {
+                Lookahead::Character(idx1, '&') => {
                     self.bump();
-                    let continue_context = self.continuation(idx0)?;
+                    let continue_context = self.continuation(idx0);
                     if require_continue_context && !continue_context {
-                        errors.push(self.one_error(
+                        self.emit_error(
                             DiscontinuedCharacterContext,
                             idx1,
-                            self.lookahead.map_or(self.text_len(), |x| x.0),
-                        ));
+                            self.lookahead_idx(self.lookahead),
+                            "Missing continuation ('&') of string literal",
+                        );
                     }
 
                     continue;
                 }
-                None => match terminate(Lookahead::EOF) {
-                    Continue => panic!("Cannot continue past EOF!"),
-                    Stop => {
-                        if !errors.is_empty() {
-                            Err(Error(errors))
-                        } else {
-                            Ok(last_idx + 1)
-                        }
-                    }
-                    ErrCode(err_code) => {
-                        errors.push(self.one_error(err_code, idx0, self.text_len() - 1));
-                        Err(Error(errors))
-                    }
+                Lookahead::EOF => match terminate(Lookahead::EOF) {
+                    Continue => panic!("Internal error: Tried to tokenize past EOF!"),
+                    Stop => Ok(self.text_len()),
+                    Abort => Err(self.text_len()),
                 },
-                Some((idx1, c)) => match terminate(Lookahead::Character(c)) {
+                Lookahead::Character(idx1, c) => match terminate(Lookahead::Character(idx1, c)) {
                     Continue => {
                         self.bump();
-                        last_idx = idx1;
                         continue;
                     }
-                    Stop => {
-                        if !errors.is_empty() {
-                            Err(Error(errors))
-                        } else {
-                            Ok(idx1)
-                        }
-                    }
-                    ErrCode(err_code) => {
-                        errors.push(self.one_error(err_code, idx0, self.text_len() - 1));
-                        Err(Error(errors))
-                    }
+                    Stop => Ok(idx1),
+                    Abort => Err(idx1),
                 },
             };
         }
     }
 
-    fn take_until<F>(&mut self, idx0: u32, terminate: F) -> Result<u32, Error>
+    fn take_until<F>(&mut self, idx0: u32, terminate: F) -> Result<u32, u32>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
         self.take_until_terminate(idx0, false, terminate)
     }
 
-    fn bump(&mut self) -> Option<(u32, char)> {
-        self.lookahead = self.chars.next().map(|(i, c)| (i as u32, c));
+    fn bump(&mut self) -> Lookahead {
+        self.lookahead = self
+            .chars
+            .next()
+            .map(|(i, c)| Lookahead::Character(i as u32, c))
+            .unwrap_or(Lookahead::EOF);
         self.lookahead
     }
 }
 
 impl<'input> Iterator for Tokenizer<'input> {
-    type Item = Result<Token, Error>;
+    type Item = Token;
 
-    fn next(&mut self) -> Option<Result<Token, Error>> {
+    fn next(&mut self) -> Option<Self::Item> {
         self.internal_next()
     }
 }
@@ -661,4 +760,15 @@ fn is_new_line_start(c: char) -> bool {
 
 fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
+}
+
+fn is_recognized_character(c: char) -> bool {
+    is_letter(c)
+        || is_digit(c)
+        || c.is_whitespace()
+        || match c {
+            '_' | '=' | '+' | '-' | '*' | '/' | '\\' | '(' | ')' | '[' | ']' | ',' | '.' | ':'
+            | ';' | '!' | '"' | '%' | '&' | '<' | '>' => true,
+            _ => false,
+        }
 }

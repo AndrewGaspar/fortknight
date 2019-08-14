@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter, Write};
+
 #[derive(Clone, Debug)]
 pub struct ContinuationStr<'input> {
     string: &'input str,
@@ -23,10 +25,13 @@ impl<'input> PartialEq for ContinuationStr<'input> {
 
 impl<'input> Eq for ContinuationStr<'input> {}
 
-impl<'input> ToString for ContinuationStr<'input> {
-    fn to_string(&self) -> String {
-        use std::iter::FromIterator;
-        String::from_iter(self.iter())
+impl<'input> Display for ContinuationStr<'input> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        for c in self.iter() {
+            f.write_char(c)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -88,9 +93,12 @@ impl<'input> PartialEq for CaseInsensitiveContinuationStr<'input> {
 
 impl<'input> Eq for CaseInsensitiveContinuationStr<'input> {}
 
-impl<'input> ToString for CaseInsensitiveContinuationStr<'input> {
-    fn to_string(&self) -> String {
-        use std::iter::FromIterator;
-        String::from_iter(self.iter())
+impl<'input> Display for CaseInsensitiveContinuationStr<'input> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        for c in self.iter() {
+            f.write_char(c)?;
+        }
+
+        Ok(())
     }
 }
