@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::default::Default;
 
 use super::{
@@ -24,8 +25,8 @@ mod strings;
 // }
 
 pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
-    let mut sink = DiagnosticSink::Raw(Box::new(std::io::sink()));
-    let tokenizer = Tokenizer::new(&TokenizerOptions::default(), FileId(0), text, &mut sink);
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let tokenizer = Tokenizer::new(&TokenizerOptions::default(), FileId(0), text, &sink);
 
     tokenizer.map(|x| x.kind).collect()
 }

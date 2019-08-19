@@ -1,17 +1,19 @@
 /// Tests tokenization of preprocessor elements
+use std::cell::RefCell;
+
 use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::parser::lex::{TokenKind, Tokenizer, TokenizerOptions};
 
 pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
-    let mut sink = DiagnosticSink::Raw(Box::new(std::io::sink()));
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
     let tokenizer = Tokenizer::new(
         &TokenizerOptions {
             tokenize_preprocessor: true,
         },
         FileId(0),
         text,
-        &mut sink,
+        &sink,
     );
 
     tokenizer.map(|x| x.kind).collect()

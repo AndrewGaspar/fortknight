@@ -42,7 +42,7 @@ impl StringInterner {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct InternedString(usize);
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct InternedName {
     pub id: InternedString,
     pub case_sensitive_id: InternedString,

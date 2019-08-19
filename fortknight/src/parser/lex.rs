@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::iter::Iterator;
 use std::str::CharIndices;
 
@@ -27,7 +28,7 @@ pub struct TokenizerOptions {
 pub struct Tokenizer<'input> {
     file_id: FileId,
     text: &'input str,
-    diagnostics: &'input mut DiagnosticSink,
+    diagnostics: &'input RefCell<DiagnosticSink>,
     chars: CharIndices<'input>,
     lookahead: Lookahead,
     tokenize_preprocessor: bool,
@@ -51,7 +52,7 @@ impl<'input> Tokenizer<'input> {
         options: &TokenizerOptions,
         file_id: FileId,
         text: &'input str,
-        diagnostics: &'input mut DiagnosticSink,
+        diagnostics: &'input RefCell<DiagnosticSink>,
     ) -> Tokenizer<'input> {
         assert!(
             text.len() <= u32::max_value() as usize,
@@ -78,7 +79,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
-        self.diagnostics.emit_error_from_contents(
+        self.diagnostics.borrow_mut().emit_error_from_contents(
             &self.text,
             AnalysisErrorKind::Parser(err),
             span,
@@ -386,19 +387,18 @@ impl<'input> Tokenizer<'input> {
     /// Parses a C style block comment
     fn c_block_commentary(&mut self, idx0: u32) -> Token {
         let mut maybe_end = false;
-        let idx1 =
-            self.take_until_ignore_continuation(|lookahead: Lookahead| match lookahead {
-                Lookahead::Character(_, '*') => {
-                    maybe_end = true;
-                    Continue
-                }
-                Lookahead::Character(_, '/') if maybe_end => Stop,
-                Lookahead::Character(_, _) => {
-                    maybe_end = false;
-                    Continue
-                }
-                Lookahead::EOF => Abort,
-            });
+        let idx1 = self.take_until_ignore_continuation(|lookahead: Lookahead| match lookahead {
+            Lookahead::Character(_, '*') => {
+                maybe_end = true;
+                Continue
+            }
+            Lookahead::Character(_, '/') if maybe_end => Stop,
+            Lookahead::Character(_, _) => {
+                maybe_end = false;
+                Continue
+            }
+            Lookahead::EOF => Abort,
+        });
 
         match idx1 {
             Ok(idx1) => {

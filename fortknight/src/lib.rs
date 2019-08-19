@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::{convert::TryInto, default::Default, path::PathBuf};
 
 pub mod data;
@@ -27,7 +28,7 @@ impl AnalysisOptions {}
 pub struct AnalysisEngine {
     options: AnalysisOptions,
     pub data: AnalysisData,
-    pub diagnostics: DiagnosticSink,
+    pub diagnostics: RefCell<DiagnosticSink>,
     _interner: StringInterner,
 }
 
@@ -36,7 +37,7 @@ impl AnalysisEngine {
         let mut engine = Self {
             options,
             data: AnalysisData::default(),
-            diagnostics: DiagnosticSink::from_stderr(),
+            diagnostics: RefCell::new(DiagnosticSink::from_stderr()),
             _interner: StringInterner::new(),
         };
 
@@ -82,7 +83,7 @@ impl AnalysisEngine {
             &parser::lex::TokenizerOptions::default(),
             file_id,
             &self.data.file_data.contents.last().unwrap(),
-            &mut self.diagnostics,
+            &self.diagnostics,
         );
         self.data.file_data.tokens.push(tokenizer.collect());
 

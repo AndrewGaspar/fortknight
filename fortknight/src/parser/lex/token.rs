@@ -3,7 +3,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 
 use crate::data::FileData;
 use crate::intern::{InternedName, StringInterner};
-use crate::span::Span;
+use crate::span::{Location, Span};
 use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 
 #[derive(Copy, Clone, Debug)]
@@ -13,11 +13,18 @@ pub struct Token {
 }
 
 impl Token {
-    fn get_internable_span(&self, file_data: &FileData) -> Option<Span> {
+    pub fn is_name(&self) -> bool {
+        match self.kind {
+            TokenKind::Name | TokenKind::Keyword(_) => true,
+            _ => false,
+        }
+    }
+
+    fn get_internable_span(&self, contents: &str) -> Option<Span> {
         let span = match self.kind {
             TokenKind::Name | TokenKind::Keyword(_) => self.span,
             TokenKind::DefinedOperator => {
-                let text = file_data.read_span(&self.span);
+                let text = &contents[self.span.start as usize..self.span.end as usize];
                 debug_assert_eq!(".", &text[..1], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
                 debug_assert_eq!(".", &text[text.len()-1..], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
 
@@ -37,7 +44,7 @@ impl Token {
         interner: &mut StringInterner,
         file_data: &FileData,
     ) -> Option<InternedName> {
-        let span = self.get_internable_span(file_data)?;
+        let span = self.get_internable_span(&file_data.contents[self.span.file_id.0 as usize])?;
 
         Some(InternedName {
             id: interner.intern_string(
@@ -46,6 +53,34 @@ impl Token {
             case_sensitive_id: interner
                 .intern_string(ContinuationStr::new(file_data.read_span(&span)).to_string()),
         })
+    }
+
+    pub fn try_intern_contents(
+        &self,
+        interner: &mut StringInterner,
+        contents: &str,
+    ) -> Option<InternedName> {
+        let span = self.get_internable_span(contents)?;
+
+        Some(InternedName {
+            id: interner.intern_string(
+                CaseInsensitiveContinuationStr::new(
+                    &contents[span.start as usize..span.end as usize],
+                )
+                .to_string(),
+            ),
+            case_sensitive_id: interner.intern_string(
+                ContinuationStr::new(&contents[span.start as usize..span.end as usize]).to_string(),
+            ),
+        })
+    }
+
+    pub fn start(&self) -> Location {
+        self.span.start_location()
+    }
+
+    pub fn end(&self) -> Location {
+        self.span.end_location()
     }
 }
 

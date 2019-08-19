@@ -122,6 +122,7 @@ pub enum ParserErrorCode {
     DiscontinuedCharacterContext,
     UnexpectedPostContinuationCharacter,
     UnterminatedCBlockComment,
+    ExpectedEOS,
 }
 
 impl ParserErrorCode {
@@ -139,6 +140,7 @@ impl ParserErrorCode {
             DiscontinuedCharacterContext => 7,
             UnexpectedPostContinuationCharacter => 8,
             UnterminatedCBlockComment => 9,
+            ExpectedEOS => 10,
         };
         assert!(code < 1000);
         code
