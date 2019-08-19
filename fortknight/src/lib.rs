@@ -79,6 +79,7 @@ impl AnalysisEngine {
         );
 
         let tokenizer = parser::lex::Tokenizer::new(
+            &parser::lex::TokenizerOptions::default(),
             file_id,
             &self.data.file_data.contents.last().unwrap(),
             &mut self.diagnostics,

@@ -104,7 +104,7 @@ pub enum AnalysisErrorKind {
 impl AnalysisErrorKind {
     pub fn code(&self) -> u16 {
         match self {
-            AnalysisErrorKind::Parser(err) => 9000 + err.code(),
+            AnalysisErrorKind::Parser(err) => 0000 + err.code(),
             AnalysisErrorKind::Io(_) => 9000,
         }
     }
@@ -121,6 +121,7 @@ pub enum ParserErrorCode {
     MissingExponent,
     DiscontinuedCharacterContext,
     UnexpectedPostContinuationCharacter,
+    UnterminatedCBlockComment,
 }
 
 impl ParserErrorCode {
@@ -137,6 +138,7 @@ impl ParserErrorCode {
             MissingExponent => 6,
             DiscontinuedCharacterContext => 7,
             UnexpectedPostContinuationCharacter => 8,
+            UnterminatedCBlockComment => 9,
         };
         assert!(code < 1000);
         code

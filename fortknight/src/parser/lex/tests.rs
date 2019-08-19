@@ -1,11 +1,14 @@
+use std::default::Default;
+
 use super::{
     token::{KeywordTokenKind, TokenKind},
-    Tokenizer,
+    Tokenizer, TokenizerOptions,
 };
 use crate::error::DiagnosticSink;
 use crate::index::FileId;
 
 mod intrinsics;
+mod preprocessor;
 mod strings;
 
 // pub fn get_tokens(text: &str) -> Vec<Result<TokenKind, ParserErrorCode>> {
@@ -22,7 +25,7 @@ mod strings;
 
 pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
     let mut sink = DiagnosticSink::Raw(Box::new(std::io::sink()));
-    let tokenizer = Tokenizer::new(FileId(0), text, &mut sink);
+    let tokenizer = Tokenizer::new(&TokenizerOptions::default(), FileId(0), text, &mut sink);
 
     tokenizer.map(|x| x.kind).collect()
 }
@@ -215,6 +218,20 @@ fn continuation() {
     );
 }
 
+#[test]
+fn unknown_pound() {
+    assert_eq!(vec![TokenKind::Unknown], get_tokens_unwrap("#"));
+}
+
+#[test]
+fn unknown_c_block_comment() {
+    use TokenKind::{Name, Slash, Star};
+
+    assert_eq!(
+        vec![Slash, Star, Name, Star, Slash,],
+        get_tokens_unwrap("/* asdf */")
+    );
+}
 #[test]
 fn dots_vs_operators() {
     assert_eq!(vec![TokenKind::EqualsOp], get_tokens_unwrap(".eq."));

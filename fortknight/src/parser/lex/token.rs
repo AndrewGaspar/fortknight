@@ -104,6 +104,10 @@ pub enum TokenKind {
     LeftBracket,
     RightBracket,
 
+    // gcc Preprocessor tokens - only tokenized when enabled
+    Pound,
+    CBlockCommentary,
+
     // Returned when an unknown token is encountered
     Unknown,
 }

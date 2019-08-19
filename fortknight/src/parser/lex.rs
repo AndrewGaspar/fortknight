@@ -19,6 +19,20 @@ mod token;
 use token::*;
 pub use token::{KeywordTokenKind, Token, TokenKind};
 
+#[derive(Clone, Copy, Default)]
+pub struct TokenizerOptions {
+    pub tokenize_preprocessor: bool,
+}
+
+pub struct Tokenizer<'input> {
+    file_id: FileId,
+    text: &'input str,
+    diagnostics: &'input mut DiagnosticSink,
+    chars: CharIndices<'input>,
+    lookahead: Lookahead,
+    tokenize_preprocessor: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TakeUntil {
     Continue,
@@ -32,16 +46,9 @@ enum Lookahead {
     EOF,
 }
 
-pub struct Tokenizer<'input> {
-    file_id: FileId,
-    text: &'input str,
-    diagnostics: &'input mut DiagnosticSink,
-    chars: CharIndices<'input>,
-    lookahead: Lookahead,
-}
-
 impl<'input> Tokenizer<'input> {
     pub fn new(
+        options: &TokenizerOptions,
         file_id: FileId,
         text: &'input str,
         diagnostics: &'input mut DiagnosticSink,
@@ -57,6 +64,7 @@ impl<'input> Tokenizer<'input> {
             diagnostics,
             chars: text.char_indices(),
             lookahead: Lookahead::EOF,
+            tokenize_preprocessor: options.tokenize_preprocessor,
         };
         t.bump();
         t
@@ -168,9 +176,13 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn unrecognized_token(&mut self, idx0: u32) -> Token {
+        let tokenize_preprocessor = self.tokenize_preprocessor;
+
         let idx1 = self
             .take_until(idx0, |lookahead: Lookahead| match lookahead {
-                Lookahead::Character(_, c) if is_recognized_character(c) => Stop,
+                Lookahead::Character(_, c) if is_recognized_character(c, tokenize_preprocessor) => {
+                    Stop
+                }
                 Lookahead::EOF => Stop,
                 _ => Continue,
             })
@@ -371,6 +383,40 @@ impl<'input> Tokenizer<'input> {
         self.token(TokenKind::Commentary, idx0, idx1)
     }
 
+    /// Parses a C style block comment
+    fn c_block_commentary(&mut self, idx0: u32) -> Token {
+        let mut maybe_end = false;
+        let idx1 =
+            self.take_until_ignore_continuation(|lookahead: Lookahead| match lookahead {
+                Lookahead::Character(_, '*') => {
+                    maybe_end = true;
+                    Continue
+                }
+                Lookahead::Character(_, '/') if maybe_end => Stop,
+                Lookahead::Character(_, _) => {
+                    maybe_end = false;
+                    Continue
+                }
+                Lookahead::EOF => Abort,
+            });
+
+        match idx1 {
+            Ok(idx1) => {
+                self.bump(); // consume '/'
+                self.token(TokenKind::CBlockCommentary, idx0, idx1)
+            }
+            Err(idx1) => {
+                self.emit_error(
+                    ParserErrorCode::UnterminatedCBlockComment,
+                    idx0,
+                    idx1,
+                    "Unterminated block comment",
+                );
+                self.token(TokenKind::Unknown, idx0, idx1)
+            }
+        }
+    }
+
     // call when you want to consume a new-line token. Test if at the start of
     // a new line with is_new_line_start.
     fn consume_new_line(&mut self) -> Token {
@@ -535,6 +581,10 @@ impl<'input> Tokenizer<'input> {
                             self.bump();
                             self.token(TokenKind::SlashEquals, idx0, idx1 + 1)
                         }
+                        Lookahead::Character(_, '*') if self.tokenize_preprocessor => {
+                            self.bump();
+                            self.c_block_commentary(idx0)
+                        }
                         _ => self.token(TokenKind::Slash, idx0, idx0 + 1),
                     }
                 }
@@ -640,6 +690,10 @@ impl<'input> Tokenizer<'input> {
                 self.bump();
                 (self.identifierish(idx0))
             }
+            (idx0, '#') if self.tokenize_preprocessor => {
+                self.bump();
+                self.token(TokenKind::Pound, idx0, idx0 + 1)
+            }
             (idx, _) => {
                 self.bump();
                 self.unrecognized_token(idx)
@@ -690,6 +744,29 @@ impl<'input> Tokenizer<'input> {
 
                     continue;
                 }
+                Lookahead::EOF => match terminate(Lookahead::EOF) {
+                    Continue => panic!("Internal error: Tried to tokenize past EOF!"),
+                    Stop => Ok(self.text_len()),
+                    Abort => Err(self.text_len()),
+                },
+                Lookahead::Character(idx1, c) => match terminate(Lookahead::Character(idx1, c)) {
+                    Continue => {
+                        self.bump();
+                        continue;
+                    }
+                    Stop => Ok(idx1),
+                    Abort => Err(idx1),
+                },
+            };
+        }
+    }
+
+    fn take_until_ignore_continuation<F>(&mut self, mut terminate: F) -> Result<u32, u32>
+    where
+        F: FnMut(Lookahead) -> TakeUntil,
+    {
+        loop {
+            return match self.lookahead {
                 Lookahead::EOF => match terminate(Lookahead::EOF) {
                     Continue => panic!("Internal error: Tried to tokenize past EOF!"),
                     Stop => Ok(self.text_len()),
@@ -762,13 +839,14 @@ fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
 }
 
-fn is_recognized_character(c: char) -> bool {
+fn is_recognized_character(c: char, tokenize_preprocessor: bool) -> bool {
     is_letter(c)
         || is_digit(c)
         || c.is_whitespace()
         || match c {
             '_' | '=' | '+' | '-' | '*' | '/' | '\\' | '(' | ')' | '[' | ']' | ',' | '.' | ':'
             | ';' | '!' | '"' | '%' | '&' | '<' | '>' => true,
+            '#' => tokenize_preprocessor,
             _ => false,
         }
 }
