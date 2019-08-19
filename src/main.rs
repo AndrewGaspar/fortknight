@@ -7,7 +7,7 @@ use fortknight::{AnalysisEngine, AnalysisOptions};
 const FILES: &'static str = "files";
 const PRINT_TOKENS: &'static str = "print_tokens";
 
-fn main() -> Result<(), Box<Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let matches = clap::App::new("Fortknight")
         .version(clap::crate_version!())
         .arg(
