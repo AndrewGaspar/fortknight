@@ -44,7 +44,7 @@ impl StringInterner {
         InternedName {
             id: self.intern_string(string),
             case_sensitive_id: self.intern_string(lower),
-        }   
+        }
     }
 }
 
