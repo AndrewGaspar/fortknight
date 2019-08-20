@@ -24,6 +24,11 @@ pub enum StmtKind {
     /// R1403: end-program-stmt is `end program name?` or `endprogram name?`
     EndProgram { name: Option<Spanned<InternedName>> },
 
+    /// R1405: module-stmt is `module name`
+    Module { name: Spanned<InternedName> },
+    /// R1406: end-module-stmt is `end module name?` or `endmodule name?`
+    EndModule {name: Option<Spanned<InternedName>> },
+
     /// Error
     Unclassifiable,
 }

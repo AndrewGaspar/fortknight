@@ -37,6 +37,15 @@ impl StringInterner {
             *self.names.get(string.as_str()).unwrap()
         }
     }
+
+    pub fn intern_name(&mut self, string: String) -> InternedName {
+        let lower = string.to_lowercase();
+
+        InternedName {
+            id: self.intern_string(string),
+            case_sensitive_id: self.intern_string(lower),
+        }   
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

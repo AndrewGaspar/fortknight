@@ -20,6 +20,49 @@ impl Token {
         }
     }
 
+    /// True if the token is a routine attribute
+    pub fn is_routine_attribute(&self) -> bool {
+        match self.kind {
+            TokenKind::Keyword(KeywordTokenKind::Elemental)
+            | TokenKind::Keyword(KeywordTokenKind::Impure)
+            | TokenKind::Keyword(KeywordTokenKind::Module)
+            | TokenKind::Keyword(KeywordTokenKind::Non_Recursive)
+            | TokenKind::Keyword(KeywordTokenKind::Pure)
+            | TokenKind::Keyword(KeywordTokenKind::Recursive) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_intrinsic_type(&self) -> bool {
+        match self.kind {
+            TokenKind::Keyword(KeywordTokenKind::Integer)
+            | TokenKind::Keyword(KeywordTokenKind::Real)
+            | TokenKind::Keyword(KeywordTokenKind::Double)
+            | TokenKind::Keyword(KeywordTokenKind::DoublePrecision)
+            | TokenKind::Keyword(KeywordTokenKind::Complex)
+            | TokenKind::Keyword(KeywordTokenKind::Character)
+            | TokenKind::Keyword(KeywordTokenKind::Logical) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the token is maybe the beginning of a routine prefix
+    pub fn is_maybe_routine_prefix(&self) -> bool {
+        if self.is_routine_attribute() {
+            return true;
+        }
+
+        if self.is_intrinsic_type() {
+            return true;
+        }
+
+        match self.kind {
+            TokenKind::Keyword(KeywordTokenKind::Type)
+            | TokenKind::Keyword(KeywordTokenKind::Class) => true,
+            _ => false,
+        }
+    }
+
     fn get_internable_span(&self, contents: &str) -> Option<Span> {
         let span = match self.kind {
             TokenKind::Name | TokenKind::Keyword(_) => self.span,
@@ -81,6 +124,10 @@ impl Token {
 
     pub fn end(&self) -> Location {
         self.span.end_location()
+    }
+
+    pub fn friendly_name(&self) -> String {
+        self.kind.friendly_name()
     }
 }
 
@@ -145,6 +192,70 @@ pub enum TokenKind {
 
     // Returned when an unknown token is encountered
     Unknown,
+}
+
+impl TokenKind {
+    pub fn friendly_name(&self) -> String {
+        use TokenKind::*;
+
+        match self {
+            Name => "name".into(),
+            Keyword(keyword) => format!("`{:?}`", keyword).to_uppercase(),
+
+            NewLine => "new-line".into(),
+            Commentary => "commentary".into(),
+
+            RealLiteralConstant => "real-literal-constant".into(),
+            CharLiteralConstant => "char-literal-constant".into(),
+            DigitString => "digit-string".into(),
+            DefinedOperator => "defined-operator".into(),
+
+            And => "`.AND.`".into(),
+            EquivalentOp => "`.EQV.`".into(),
+            NotEquivalentOp => "`.NEQV.".into(),
+            NotOp => "`.NOT.`".into(),
+            OrOp => "`.OR.`".into(),
+            EqualsOp => "`.EQ.`".into(),
+            NotEqualsOp => "`.NE.`".into(),
+            LessThanOp => "`.LT.`".into(),
+            LessThanOrEqualsOp => "`.LE.`".into(),
+            GreaterThanOp => "`.GT.`".into(),
+            GreaterThanOrEqualsOp => "`.GE.`".into(),
+            True => "`.TRUE.`".into(),
+            False => "`.FALSE.`".into(),
+
+            Arrow => "`=>`".into(),
+            Equals => "`=`".into(),
+            Minus => "`-`".into(),
+            Percent => "`%`".into(),
+            Plus => "`+`".into(),
+            Slash => "`/`".into(),
+            SlashSlash => "`//`".into(),
+            Star => "`*`".into(),
+            StarStar => "`**`".into(),
+            Colon => "`:`".into(),
+            ColonColon => "`::`".into(),
+            Dot => "`.`".into(),
+            Comma => "`,`".into(),
+            SemiColon => "`;`".into(),
+            EqualsEquals => "`==`".into(),
+            SlashEquals => "`/=`".into(),
+            LeftAngle => "`<`".into(),
+            LeftAngleEquals => "`<=`".into(),
+            RightAngle => "`>`".into(),
+            RightAngleEquals => "`>=`".into(),
+
+            LeftParen => "`(`".into(),
+            RightParen => "`)`".into(),
+            LeftBracket => "`[`".into(),
+            RightBracket => "`]`".into(),
+
+            Pound => "`#`".into(),
+            CBlockCommentary => "c-block-commentary".into(),
+
+            Unknown => "unknown".into(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
