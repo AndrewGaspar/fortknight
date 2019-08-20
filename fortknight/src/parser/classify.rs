@@ -4,6 +4,7 @@ use std::iter::Peekable;
 
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode};
 use crate::index::FileId;
+use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
@@ -12,7 +13,7 @@ mod statements;
 #[cfg(test)]
 mod tests;
 
-use statements::Spanned;
+use statements::{ParentIdentifier, Spanned};
 pub use statements::{Stmt, StmtKind};
 
 pub struct Classifier<'input> {
@@ -44,6 +45,10 @@ impl<'input> Classifier<'input> {
         self.tokenizer.next()
     }
 
+    fn peek(&mut self) -> Option<&Token> {
+        self.tokenizer.peek()
+    }
+
     fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
         self.diagnostics.borrow_mut().emit_error_from_contents(
             &self.text,
@@ -70,12 +75,39 @@ impl<'input> Classifier<'input> {
         self.text.len() as u32
     }
 
-    fn expected_token(
+    fn end_program_construct<MakeEndConstruct>(
         &mut self,
-        tokens: &[TokenKind],
         start_span: &Span,
-        unexpected_token: &Span,
-    ) -> Stmt {
+        make_end_construct: MakeEndConstruct,
+    ) -> Stmt
+    where
+        MakeEndConstruct: FnOnce(Option<Spanned<InternedName>>) -> StmtKind,
+    {
+        let (name, end) = match self.tokenizer.peek() {
+            Some(t) if t.is_name() => (
+                Some(Spanned::new(
+                    t.try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                    t.span,
+                )),
+                self.bump().unwrap().span.end,
+            ),
+            _ => (None, start_span.end),
+        };
+
+        self.expect_eos();
+
+        Stmt {
+            kind: make_end_construct(name),
+            span: Span {
+                file_id: self.file_id,
+                start: start_span.start,
+                end,
+            },
+        }
+    }
+
+    fn expected_token(&mut self, tokens: &[TokenKind], start_span: &Span) -> Stmt {
         let mut msg = if tokens.len() == 1 {
             format!("expected {}", tokens[0].friendly_name())
         } else if tokens.len() == 2 {
@@ -98,11 +130,27 @@ impl<'input> Classifier<'input> {
             msg
         };
 
-        let t = self.tokenizer.peek().unwrap();
+        match self.peek() {
+            Some(t) => {
+                write!(&mut msg, ", found {}", t.friendly_name()).unwrap();
+                let span = t.span.clone();
 
-        write!(&mut msg, ", found {}", t.friendly_name()).unwrap();
+                self.emit_error_span(ParserErrorCode::ExpectedToken, span, &msg);
+            }
+            None => {
+                write!(&mut msg, ", found end of file").unwrap();
 
-        self.emit_error_span(ParserErrorCode::ExpectedToken, *unexpected_token, &msg);
+                self.emit_error_span(
+                    ParserErrorCode::ExpectedToken,
+                    Span {
+                        file_id: self.file_id,
+                        start: self.text_len(),
+                        end: self.text_len(),
+                    },
+                    &msg,
+                );
+            }
+        };
 
         match self.take_until_eos() {
             Some(span) => self.unclassifiable(start_span.start, span.end),
@@ -191,28 +239,7 @@ impl<'input> Classifier<'input> {
     }
 
     fn end_program(&mut self, start_span: &Span) -> Stmt {
-        let (name, end) = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => (
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                )),
-                self.bump().unwrap().span.end,
-            ),
-            _ => (None, start_span.end),
-        };
-
-        self.expect_eos();
-
-        Stmt {
-            kind: StmtKind::EndProgram { name },
-            span: Span {
-                file_id: self.file_id,
-                start: start_span.start,
-                end,
-            },
-        }
+        self.end_program_construct(start_span, |name| StmtKind::EndProgram { name })
     }
 
     /// Call for statement classifications that aren't implemented
@@ -286,8 +313,7 @@ impl<'input> Classifier<'input> {
                 ),
                 self.bump().unwrap().span.end,
             ),
-            Some(Token { span, .. }) => {
-                let span = span.clone();
+            _ => {
                 return self.expected_token(
                     &[
                         TokenKind::Keyword(KeywordTokenKind::Procedure),
@@ -305,10 +331,8 @@ impl<'input> Classifier<'input> {
                         TokenKind::Name,
                     ],
                     start_span,
-                    &span,
                 );
             }
-            _ => panic!(),
         };
 
         self.expect_eos();
@@ -325,28 +349,113 @@ impl<'input> Classifier<'input> {
 
     /// Parses a statement starting with `endmodule` or `end module`.
     fn end_module(&mut self, start_span: &Span) -> Stmt {
-        let (name, end) = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => (
-                Some(Spanned::new(
+        self.end_program_construct(start_span, |name| StmtKind::EndModule { name })
+    }
+
+    /// Parses a submodule statement
+    fn submodule(&mut self, start_span: &Span) -> Stmt {
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::LeftParen,
+                ..
+            }) => self.bump().unwrap(),
+            _ => {
+                return self.expected_token(&[TokenKind::LeftParen], start_span);
+            }
+        };
+
+        // Parse the parent identifier.
+        let ancestor_module_name = match self.peek() {
+            Some(t) if t.is_name() => self
+                .bump()
+                .unwrap()
+                .try_intern_contents(&mut self.interner, &self.text)
+                .unwrap(),
+            _ => {
+                return self.expected_token(&[TokenKind::Name], start_span);
+            }
+        };
+
+        let parent_submodule_name = match self.peek() {
+            Some(Token {
+                kind: TokenKind::Colon,
+                ..
+            }) => {
+                self.bump();
+                Some(match self.peek() {
+                    Some(t) if t.is_name() => self
+                        .bump()
+                        .unwrap()
+                        .try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                    _ => {
+                        return self.expected_token(&[TokenKind::Name], start_span);
+                    }
+                })
+            }
+            Some(Token {
+                kind: TokenKind::RightParen,
+                ..
+            }) => {
+                // Don't consume yet - just return parent submodule name
+                None
+            }
+            _ => {
+                return self.expected_token(&[TokenKind::Colon, TokenKind::RightParen], start_span);
+            }
+        };
+
+        let parent_identifier = ParentIdentifier {
+            ancestor_module_name,
+            parent_submodule_name,
+        };
+
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::RightParen,
+                ..
+            }) => self.bump(),
+            _ => {
+                return self.expected_token(&[TokenKind::RightParen], start_span);
+            }
+        };
+
+        let name = match self.peek() {
+            Some(t) if t.is_name() => {
+                let t = self.bump().unwrap();
+
+                let span = t.span;
+
+                Spanned::new(
                     t.try_intern_contents(&mut self.interner, &self.text)
                         .unwrap(),
-                    t.span,
-                )),
-                self.bump().unwrap().span.end,
-            ),
-            _ => (None, start_span.end),
+                    span,
+                )
+            }
+            _ => {
+                return self.expected_token(&[TokenKind::Name], start_span);
+            }
         };
 
         self.expect_eos();
 
+        let span = name.span;
         Stmt {
-            kind: StmtKind::EndModule { name },
+            kind: StmtKind::Submodule {
+                parent_identifier,
+                name,
+            },
             span: Span {
                 file_id: self.file_id,
                 start: start_span.start,
-                end,
+                end: span.end,
             },
         }
+    }
+
+    /// Parses a statement starting with `endsubmodule` or `end submodule`.
+    fn end_submodule(&mut self, start_span: &Span) -> Stmt {
+        self.end_program_construct(start_span, |name| StmtKind::EndSubmodule { name })
     }
 
     fn end(&mut self, start_span: &Span) -> Stmt {
@@ -369,6 +478,10 @@ impl<'input> Classifier<'input> {
                 self.bump();
                 self.end_module(start_span)
             }
+            TokenKind::Keyword(KeywordTokenKind::Submodule) => {
+                self.bump();
+                self.end_submodule(start_span)
+            }
             _ => {
                 self.expect_eos();
                 Stmt {
@@ -388,6 +501,8 @@ impl<'input> Classifier<'input> {
             TokenKind::Keyword(KeywordTokenKind::Module) => self.module(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndModule) => self.end_module(&token.span),
             TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
+            TokenKind::Keyword(KeywordTokenKind::Submodule) => self.submodule(&token.span),
+            TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 

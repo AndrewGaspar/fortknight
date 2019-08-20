@@ -13,6 +13,13 @@ impl<T> Spanned<T> {
     }
 }
 
+/// R1418: parent-identifer is ancestore-module-name [ : parent-submodule-name ]
+#[derive(PartialEq, Debug)]
+pub struct ParentIdentifier {
+    pub ancestor_module_name: InternedName,
+    pub parent_submodule_name: Option<InternedName>,
+}
+
 #[derive(PartialEq, Debug)]
 pub enum StmtKind {
     // Bare statements
@@ -28,6 +35,15 @@ pub enum StmtKind {
     Module { name: Spanned<InternedName> },
     /// R1406: end-module-stmt is `end module name?` or `endmodule name?`
     EndModule { name: Option<Spanned<InternedName>> },
+
+    /// R1417: submodule-stmt is `submodule ( parent-identifier ) submodule-name`
+    Submodule {
+        parent_identifier: ParentIdentifier,
+        name: Spanned<InternedName>,
+    },
+
+    /// R1419: end-submodule-stmt is `end submodule name?` or `endsubmodule name?`
+    EndSubmodule { name: Option<Spanned<InternedName>> },
 
     /// Error
     Unclassifiable,
