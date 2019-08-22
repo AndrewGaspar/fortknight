@@ -133,7 +133,7 @@ pub struct ParentIdentifier {
 /// R1409: use-stmt: Can have 'rename-list' or 'only-list' or neither
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ModuleImportList<'a> {
-    All,
+    Unspecified,
     RenameList(&'a [Spanned<Rename>]),
     OnlyList(&'a [Spanned<Only>]),
 }
@@ -141,6 +141,7 @@ pub enum ModuleImportList<'a> {
 /// R1410: module-nature is INTRINSIC or NON_INTRINSIC
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ModuleNature {
+    Unspecified,
     Intrinsic,
     NonIntrinsic,
 }
@@ -166,8 +167,11 @@ pub enum Rename {
 ///     or rename
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Only {
+    /// We can't tell the difference between `generic-name` in `generic-spec` from `only-use-name`
+    /// at this point, so that must be determined later.
+    GenericOrOnlyUseName(InternedName),
     GenericSpec(GenericSpec),
-    OnlyUseName(InternedName),
+    // OnlyUseName(InternedName),
     Rename(Rename),
 }
 
@@ -217,7 +221,7 @@ pub enum StmtKind<'a> {
     ///     is USE [ [ , module-nature ] :: ] module-name [ , rename-list ]
     ///     or USE [ [ , module-nature ] :: ] module-name , ONLY : [ only-list ]
     Use {
-        module_nature: Option<ModuleNature>,
+        module_nature: ModuleNature,
         name: InternedName,
         imports: ModuleImportList<'a>,
     },

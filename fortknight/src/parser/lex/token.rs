@@ -146,7 +146,7 @@ pub enum TokenKind {
     DefinedOperator,
 
     // Symbols
-    And,
+    AndOp,
     EquivalentOp,
     NotEquivalentOp,
     NotOp,
@@ -210,7 +210,7 @@ impl TokenKind {
             DigitString => "digit-string".into(),
             DefinedOperator => "defined-operator".into(),
 
-            And => "`.AND.`".into(),
+            AndOp => "`.AND.`".into(),
             EquivalentOp => "`.EQV.`".into(),
             NotEquivalentOp => "`.NEQV.".into(),
             NotOp => "`.NOT.`".into(),
@@ -912,7 +912,7 @@ pub const INTRINSIC_OPERATORS: &'static [(&'static str, TokenKind)] = {
     use self::TokenKind::*;
 
     &[
-        ("AND", And),
+        ("AND", AndOp),
         ("EQ", EqualsOp),
         ("EQV", EquivalentOp),
         ("FALSE", False),

@@ -5,7 +5,9 @@ use std::default::Default;
 use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::intern::StringInterner;
-use crate::parser::classify::statements::{ParentIdentifier, Spanned};
+use crate::parser::classify::statements::{
+    ModuleImportList, ModuleNature, ParentIdentifier, Spanned,
+};
 use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
 use crate::span::Span;
@@ -191,6 +193,54 @@ fn bare_submodule() {
     let mut c = classifier("submodule", &sink, &mut interner, &arena);
 
     assert_eq!(vec![StmtKind::Unclassifiable], get_stmts(&mut c));
+}
+
+#[test]
+fn use_statement() {
+    let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
+
+    let foo = interner.intern_name("foo".into());
+
+    {
+        let mut c = classifier("use foo", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::Unspecified,
+                name: foo,
+                imports: ModuleImportList::Unspecified
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("use, non_intrinsic foo", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::Unspecified
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("use, non_intrinsic :: foo", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::Unspecified
+            }],
+            get_stmts(&mut c)
+        );
+    }
 }
 
 fn classifier<'input, 'arena>(
