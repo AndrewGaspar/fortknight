@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::iter::Peekable;
 
+use typed_arena::Arena;
+
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode};
 use crate::index::FileId;
 use crate::intern::InternedName;
@@ -13,24 +15,38 @@ mod statements;
 #[cfg(test)]
 mod tests;
 
-use statements::{ParentIdentifier, Spanned};
+use statements::{Only, ParentIdentifier, Rename, Spanned};
 pub use statements::{Stmt, StmtKind};
 
-pub struct Classifier<'input> {
+#[derive(Default)]
+pub struct ClassifierArena {
+    onlys: Arena<Spanned<Only>>,
+    renames: Arena<Spanned<Rename>>,
+}
+
+impl ClassifierArena {
+    pub fn new() -> Self {
+        ClassifierArena::default()
+    }
+}
+
+pub struct Classifier<'input, 'arena> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
     tokenizer: Peekable<Tokenizer<'input>>,
     interner: &'input mut crate::intern::StringInterner,
+    arena: &'arena ClassifierArena,
 }
 
-impl<'input> Classifier<'input> {
+impl<'input, 'arena> Classifier<'input, 'arena> {
     pub fn new(
         options: &TokenizerOptions,
         file_id: FileId,
         text: &'input str,
         diagnostics: &'input RefCell<DiagnosticSink>,
         interner: &'input mut crate::intern::StringInterner,
+        arena: &'arena ClassifierArena,
     ) -> Self {
         Classifier {
             file_id,
@@ -38,6 +54,7 @@ impl<'input> Classifier<'input> {
             diagnostics,
             tokenizer: Tokenizer::new(options, file_id, text, diagnostics).peekable(),
             interner,
+            arena,
         }
     }
 
@@ -75,13 +92,13 @@ impl<'input> Classifier<'input> {
         self.text.len() as u32
     }
 
-    fn end_program_construct<MakeEndConstruct>(
-        &mut self,
+    fn end_program_construct<'a, MakeEndConstruct>(
+        &'a mut self,
         start_span: &Span,
         make_end_construct: MakeEndConstruct,
-    ) -> Stmt
+    ) -> Stmt<'arena>
     where
-        MakeEndConstruct: FnOnce(Option<Spanned<InternedName>>) -> StmtKind,
+        MakeEndConstruct: FnOnce(Option<Spanned<InternedName>>) -> StmtKind<'arena>,
     {
         let (name, end) = match self.tokenizer.peek() {
             Some(t) if t.is_name() => (
@@ -107,7 +124,7 @@ impl<'input> Classifier<'input> {
         }
     }
 
-    fn expected_token(&mut self, tokens: &[TokenKind], start_span: &Span) -> Stmt {
+    fn expected_token(&mut self, tokens: &[TokenKind], start_span: &Span) -> Stmt<'arena> {
         let mut msg = if tokens.len() == 1 {
             format!("expected {}", tokens[0].friendly_name())
         } else if tokens.len() == 2 {
@@ -158,7 +175,7 @@ impl<'input> Classifier<'input> {
         }
     }
 
-    fn unclassifiable(&self, idx0: u32, idx1: u32) -> Stmt {
+    fn unclassifiable(&self, idx0: u32, idx1: u32) -> Stmt<'arena> {
         Stmt {
             kind: StmtKind::Unclassifiable,
             span: Span {
@@ -213,7 +230,7 @@ impl<'input> Classifier<'input> {
         };
     }
 
-    fn program(&mut self, start_span: &Span) -> Stmt {
+    fn program(&mut self, start_span: &Span) -> Stmt<'arena> {
         let (name, end) = match self.tokenizer.peek() {
             Some(t) if t.is_name() => (
                 Some(Spanned::new(
@@ -238,12 +255,12 @@ impl<'input> Classifier<'input> {
         }
     }
 
-    fn end_program(&mut self, start_span: &Span) -> Stmt {
+    fn end_program(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.end_program_construct(start_span, |name| StmtKind::EndProgram { name })
     }
 
     /// Call for statement classifications that aren't implemented
-    fn unimplemented(&mut self, start_span: &Span) -> Stmt {
+    fn unimplemented(&mut self, start_span: &Span) -> Stmt<'arena> {
         match self.take_until_eos() {
             Some(span) => self.unclassifiable(start_span.start, span.end),
             None => self.unclassifiable(start_span.start, start_span.end),
@@ -251,27 +268,27 @@ impl<'input> Classifier<'input> {
     }
 
     /// TODO: Parse procedures
-    fn procedure(&mut self, start_span: &Span) -> Stmt {
+    fn procedure(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.unimplemented(start_span)
     }
 
     // TODO: Parse module procedure statement
-    fn module_procedure(&mut self, start_span: &Span) -> Stmt {
+    fn module_procedure(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.unimplemented(start_span)
     }
 
     // TODO: Parse function statement
-    fn function(&mut self, start_span: &Span) -> Stmt {
+    fn function(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.unimplemented(start_span)
     }
 
     // TODO: Parse function statement
-    fn subroutine(&mut self, start_span: &Span) -> Stmt {
+    fn subroutine(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.unimplemented(start_span)
     }
 
     // TODO: Parse function or subroutine statement when it's not yet obvious which it is
-    fn subroutine_or_function(&mut self, start_span: &Span) -> Stmt {
+    fn subroutine_or_function(&mut self, start_span: &Span) -> Stmt<'arena> {
         match self.take_until_eos() {
             Some(span) => self.unclassifiable(start_span.start, span.end),
             None => self.unclassifiable(start_span.start, start_span.end),
@@ -280,7 +297,7 @@ impl<'input> Classifier<'input> {
 
     /// Parses from a statement starting with 'module'. Can be a procedure-stmt, module-stmt,
     /// function-stmt, or subroutine-stmt
-    fn module(&mut self, start_span: &Span) -> Stmt {
+    fn module(&mut self, start_span: &Span) -> Stmt<'arena> {
         let (name, end) = match self.tokenizer.peek() {
             // Don't consume module keyword for procedures - let the delegated routine parse it.
             Some(Token {
@@ -348,12 +365,16 @@ impl<'input> Classifier<'input> {
     }
 
     /// Parses a statement starting with `endmodule` or `end module`.
-    fn end_module(&mut self, start_span: &Span) -> Stmt {
+    fn end_module(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.end_program_construct(start_span, |name| StmtKind::EndModule { name })
     }
 
+    fn use_statement(&mut self, start_span: &Span) -> Stmt<'arena> {
+        self.unimplemented(start_span)
+    }
+
     /// Parses a submodule statement
-    fn submodule(&mut self, start_span: &Span) -> Stmt {
+    fn submodule(&mut self, start_span: &Span) -> Stmt<'arena> {
         match self.peek() {
             Some(Token {
                 kind: TokenKind::LeftParen,
@@ -454,11 +475,11 @@ impl<'input> Classifier<'input> {
     }
 
     /// Parses a statement starting with `endsubmodule` or `end submodule`.
-    fn end_submodule(&mut self, start_span: &Span) -> Stmt {
+    fn end_submodule(&mut self, start_span: &Span) -> Stmt<'arena> {
         self.end_program_construct(start_span, |name| StmtKind::EndSubmodule { name })
     }
 
-    fn end(&mut self, start_span: &Span) -> Stmt {
+    fn end(&mut self, start_span: &Span) -> Stmt<'arena> {
         let token = match self.tokenizer.peek() {
             Some(token) => token,
             None => {
@@ -492,7 +513,7 @@ impl<'input> Classifier<'input> {
         }
     }
 
-    fn internal_next(&mut self) -> Option<Stmt> {
+    pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
         let token = self.tokenizer.next()?;
 
         let stmt = match token.kind {
@@ -503,17 +524,10 @@ impl<'input> Classifier<'input> {
             TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Submodule) => self.submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
+            TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 
         Some(stmt)
-    }
-}
-
-impl<'input> Iterator for Classifier<'input> {
-    type Item = Stmt;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.internal_next()
     }
 }

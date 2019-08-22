@@ -1,3 +1,6 @@
+// TODO: Remove this once this library is further along.
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::{convert::TryInto, default::Default, path::PathBuf};
 

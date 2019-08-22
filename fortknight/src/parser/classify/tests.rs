@@ -6,7 +6,7 @@ use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::intern::StringInterner;
 use crate::parser::classify::statements::{ParentIdentifier, Spanned};
-use crate::parser::classify::{Classifier, StmtKind};
+use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
 use crate::span::Span;
 
@@ -14,9 +14,14 @@ use crate::span::Span;
 fn program() {
     use StmtKind::*;
 
+    let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
+    let mut c = classifier("program; end program", &sink, &mut interner, &arena);
+
     assert_eq!(
         vec![Program { name: None }, EndProgram { name: None }],
-        get_stmts_unwrap("program; end program")
+        get_stmts(&mut c)
     );
 }
 
@@ -25,146 +30,193 @@ fn module() {
     use StmtKind::*;
 
     let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
 
-    assert_eq!(
-        vec![
-            Module {
-                name: Spanned::new(interner.intern_name("foo".into()), test_span(7, 10))
-            },
-            EndModule { name: None }
-        ],
-        get_stmts_with_interner_unwrap("module foo; end module", &mut interner)
-    );
+    let foo = interner.intern_name("foo".into());
 
-    assert_eq!(
-        vec![
-            Module {
-                name: Spanned::new(interner.intern_name("foo".into()), test_span(7, 10))
-            },
-            EndModule { name: None }
-        ],
-        get_stmts_with_interner_unwrap("module foo; endmodule", &mut interner)
-    );
+    {
+        let mut c = classifier("module foo; end module", &sink, &mut interner, &arena);
 
-    assert_eq!(
-        vec![
-            Module {
-                name: Spanned::new(interner.intern_name("foo".into()), test_span(7, 10))
-            },
-            EndModule {
-                name: Some(Spanned::new(
-                    interner.intern_name("foo".into()),
-                    test_span(22, 25)
-                ))
-            }
-        ],
-        get_stmts_with_interner_unwrap("module foo; endmodule foo", &mut interner)
-    );
+        assert_eq!(
+            vec![
+                Module {
+                    name: Spanned::new(foo, test_span(7, 10))
+                },
+                EndModule { name: None }
+            ],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("module foo; endmodule", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![
+                Module {
+                    name: Spanned::new(foo, test_span(7, 10))
+                },
+                EndModule { name: None }
+            ],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("module foo; endmodule foo", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![
+                Module {
+                    name: Spanned::new(foo, test_span(7, 10))
+                },
+                EndModule {
+                    name: Some(Spanned::new(foo, test_span(22, 25)))
+                }
+            ],
+            get_stmts(&mut c)
+        );
+    }
 }
 
 #[test]
 fn bare_module() {
-    assert_eq!(
-        vec![StmtKind::Unclassifiable, StmtKind::EndModule { name: None }],
-        get_stmts_unwrap("module;end module")
-    );
+    let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
 
-    assert_eq!(vec![StmtKind::Unclassifiable], get_stmts_unwrap("module"));
+    {
+        let mut c = classifier("module;end module", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Unclassifiable, StmtKind::EndModule { name: None }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("module", &sink, &mut interner, &arena);
+
+        assert_eq!(vec![StmtKind::Unclassifiable], get_stmts(&mut c));
+    }
 }
 
 #[test]
 fn submodule() {
     let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
 
-    assert_eq!(
-        vec![
-            StmtKind::Submodule {
-                parent_identifier: ParentIdentifier {
-                    ancestor_module_name: interner.intern_name("parent".into()),
-                    parent_submodule_name: None
-                },
-                name: Spanned::new(interner.intern_name("mysub".into()), test_span(19, 24))
-            },
-            StmtKind::EndSubmodule { name: None }
-        ],
-        get_stmts_with_interner_unwrap("submodule (parent) mysub; end submodule", &mut interner)
-    );
+    let parent = interner.intern_name("parent".into());
+    let mysub = interner.intern_name("mysub".into());
+    let another_sub = interner.intern_name("another_sub".into());
 
-    assert_eq!(
-        vec![
-            StmtKind::Submodule {
-                parent_identifier: ParentIdentifier {
-                    ancestor_module_name: interner.intern_name("parent".into()),
-                    parent_submodule_name: Some(interner.intern_name("another_sub".into()))
+    {
+        let mut c = classifier(
+            "submodule (parent) mysub; end submodule",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        assert_eq!(
+            vec![
+                StmtKind::Submodule {
+                    parent_identifier: ParentIdentifier {
+                        ancestor_module_name: parent,
+                        parent_submodule_name: None
+                    },
+                    name: Spanned::new(mysub, test_span(19, 24))
                 },
-                name: Spanned::new(interner.intern_name("mysub".into()), test_span(32, 37))
-            },
-            StmtKind::EndSubmodule { name: None }
-        ],
-        get_stmts_with_interner_unwrap(
+                StmtKind::EndSubmodule { name: None }
+            ],
+            get_stmts(&mut c)
+        );
+    }
+    {
+        let mut c = classifier(
             "submodule (parent: another_sub) mysub; end submodule",
-            &mut interner
-        )
-    );
+            &sink,
+            &mut interner,
+            &arena,
+        );
 
-    assert_eq!(
-        vec![
-            StmtKind::Submodule {
-                parent_identifier: ParentIdentifier {
-                    ancestor_module_name: interner.intern_name("parent".into()),
-                    parent_submodule_name: Some(interner.intern_name("another_sub".into()))
+        assert_eq!(
+            vec![
+                StmtKind::Submodule {
+                    parent_identifier: ParentIdentifier {
+                        ancestor_module_name: parent,
+                        parent_submodule_name: Some(another_sub)
+                    },
+                    name: Spanned::new(mysub, test_span(32, 37))
                 },
-                name: Spanned::new(interner.intern_name("mysub".into()), test_span(32, 37))
-            },
-            StmtKind::EndSubmodule {
-                name: Some(Spanned::new(
-                    interner.intern_name("mysub".into()),
-                    test_span(52, 57)
-                ))
-            }
-        ],
-        get_stmts_with_interner_unwrap(
+                StmtKind::EndSubmodule { name: None }
+            ],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
             "submodule (parent: another_sub) mysub; endsubmodule mysub",
-            &mut interner
-        )
-    );
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        assert_eq!(
+            vec![
+                StmtKind::Submodule {
+                    parent_identifier: ParentIdentifier {
+                        ancestor_module_name: parent,
+                        parent_submodule_name: Some(another_sub)
+                    },
+                    name: Spanned::new(mysub, test_span(32, 37))
+                },
+                StmtKind::EndSubmodule {
+                    name: Some(Spanned::new(mysub, test_span(52, 57)))
+                }
+            ],
+            get_stmts(&mut c)
+        );
+    }
 }
 
 #[test]
 fn bare_submodule() {
-    assert_eq!(
-        vec![StmtKind::Unclassifiable],
-        get_stmts_unwrap("submodule")
-    );
-}
-
-fn get_stmts_unwrap(text: &str) -> Vec<StmtKind> {
-    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
     let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
+    let mut c = classifier("submodule", &sink, &mut interner, &arena);
 
-    let classifier = Classifier::new(
-        &TokenizerOptions::default(),
-        FileId(0),
-        text,
-        &sink,
-        &mut interner,
-    );
-
-    classifier.map(|s| s.kind).collect()
+    assert_eq!(vec![StmtKind::Unclassifiable], get_stmts(&mut c));
 }
 
-fn get_stmts_with_interner_unwrap(text: &str, interner: &mut StringInterner) -> Vec<StmtKind> {
-    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
-
-    let classifier = Classifier::new(
+fn classifier<'input, 'arena>(
+    text: &'input str,
+    sink: &'input RefCell<DiagnosticSink>,
+    interner: &'input mut StringInterner,
+    arena: &'arena ClassifierArena,
+) -> Classifier<'input, 'arena> {
+    Classifier::new(
         &TokenizerOptions::default(),
         FileId(0),
         text,
-        &sink,
+        sink,
         interner,
-    );
+        arena,
+    )
+}
 
-    classifier.map(|s| s.kind).collect()
+fn get_stmts<'a>(classifier: &'_ mut Classifier<'_, 'a>) -> Vec<StmtKind<'a>> {
+    let mut stmts = vec![];
+
+    while let Some(stmt) = classifier.next_stmt() {
+        stmts.push(stmt.kind);
+    }
+
+    stmts
 }
 
 fn test_span(start: u32, end: u32) -> Span {
