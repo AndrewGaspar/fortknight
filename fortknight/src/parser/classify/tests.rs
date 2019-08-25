@@ -392,6 +392,37 @@ fn use_statement() {
             get_stmts(&mut c)
         );
     }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : operator(.foo.) => operator(.bar.), me, you, assignment(=)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(
+                Only::Rename(Rename::Operator { from: foo, to: bar }),
+                test_span(34, 68),
+            ),
+            Spanned::new(Only::GenericOrOnlyUseName(me), test_span(70, 72)),
+            Spanned::new(Only::GenericOrOnlyUseName(you), test_span(74, 77)),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::Assignment),
+                test_span(79, 92),
+            ),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
 }
 
 fn classifier<'input, 'arena>(
