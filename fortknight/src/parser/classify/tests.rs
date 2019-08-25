@@ -6,7 +6,8 @@ use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::intern::StringInterner;
 use crate::parser::classify::statements::{
-    ModuleImportList, ModuleNature, ParentIdentifier, Spanned,
+    DefinedOperator, GenericSpec, ModuleImportList, ModuleNature, Only, ParentIdentifier, Rename,
+    Spanned,
 };
 use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
@@ -202,6 +203,9 @@ fn use_statement() {
     let arena = ClassifierArena::new();
 
     let foo = interner.intern_name("foo".into());
+    let you = interner.intern_name("you".into());
+    let bar = interner.intern_name("bar".into());
+    let me = interner.intern_name("me".into());
 
     {
         let mut c = classifier("use foo", &sink, &mut interner, &arena);
@@ -237,6 +241,153 @@ fn use_statement() {
                 module_nature: ModuleNature::NonIntrinsic,
                 name: foo,
                 imports: ModuleImportList::Unspecified
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : you",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![Spanned::new(
+            Only::GenericOrOnlyUseName(you),
+            test_span(34, 37),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : you, me",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(Only::GenericOrOnlyUseName(you), test_span(34, 37)),
+            Spanned::new(Only::GenericOrOnlyUseName(me), test_span(39, 41)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : you, me => you",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(Only::GenericOrOnlyUseName(you), test_span(34, 37)),
+            Spanned::new(
+                Only::Rename(Rename::Name { from: me, to: you }),
+                test_span(39, 48),
+            ),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : operator(.foo.)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![Spanned::new(
+            Only::GenericSpec(GenericSpec::Operator(
+                DefinedOperator::DefinedUnaryOrBinaryOp(foo),
+            )),
+            test_span(34, 49),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : operator(.foo.) => operator(.bar.)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![Spanned::new(
+            Only::Rename(Rename::Operator { from: foo, to: bar }),
+            test_span(34, 68),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : operator(.foo.) => operator(.bar.), me, you",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(
+                Only::Rename(Rename::Operator { from: foo, to: bar }),
+                test_span(34, 68),
+            ),
+            Spanned::new(Only::GenericOrOnlyUseName(me), test_span(70, 72)),
+            Spanned::new(Only::GenericOrOnlyUseName(you), test_span(74, 77)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
             }],
             get_stmts(&mut c)
         );

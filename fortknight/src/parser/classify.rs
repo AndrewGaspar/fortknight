@@ -793,10 +793,32 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
                 Some(Token {
                     kind: TokenKind::Comma,
-                    span,
+                    ..
                 }) => {
                     // We don't consume the comma, but this is just a plain name - return it!
-                    let span = *span;
+                    let span = t.span;
+                    return Some(Spanned::new(
+                        Only::GenericOrOnlyUseName(
+                            t.try_intern_contents(&mut self.interner, &self.text)
+                                .unwrap(),
+                        ),
+                        span,
+                    ));
+                }
+                Some(t2) if Self::is_eos(t2) => {
+                    // We don't consume the EOS, but this is just a plain name - return it!
+                    let span = t.span;
+                    return Some(Spanned::new(
+                        Only::GenericOrOnlyUseName(
+                            t.try_intern_contents(&mut self.interner, &self.text)
+                                .unwrap(),
+                        ),
+                        span,
+                    ));
+                }
+                None => {
+                    // We don't consume the EOS, but this is just a plain name - return it!
+                    let span: Span = t.span;
                     return Some(Spanned::new(
                         Only::GenericOrOnlyUseName(
                             t.try_intern_contents(&mut self.interner, &self.text)
@@ -839,10 +861,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             Only::GenericSpec(GenericSpec::Operator(defined_operator.val)),
                             defined_operator.span,
                         ),
+                        None => Spanned::new(
+                            Only::GenericSpec(GenericSpec::Operator(defined_operator.val)),
+                            defined_operator.span,
+                        ),
                         Some(Token {
                             kind: TokenKind::Arrow,
                             ..
                         }) if user_defined_operator.is_some() => {
+                            // consume arrow
+                            self.bump().unwrap();
+
                             let operator_name = match self.user_defined_operator() {
                                 Ok(operator_name) => operator_name,
                                 Err(TakeUntil::Continue) => continue,
@@ -864,20 +893,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                         _ => {
                             if user_defined_operator.is_some() {
-                                self.emit_expected_token(&[
+                                self.emit_expected_token(&eos_or(&[
                                     TokenKind::Comma,
                                     TokenKind::Arrow,
-                                    TokenKind::SemiColon,
-                                    TokenKind::NewLine,
-                                    TokenKind::Commentary,
-                                ]);
+                                ]));
                             } else {
-                                self.emit_expected_token(&[
-                                    TokenKind::Comma,
-                                    TokenKind::SemiColon,
-                                    TokenKind::NewLine,
-                                    TokenKind::Commentary,
-                                ]);
+                                self.emit_expected_token(&eos_or(&[TokenKind::Comma]));
                             }
 
                             self.only_skip_to_next()?;
@@ -1126,12 +1147,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
             _ => {
                 // On unexpected token, emit an error, but still return a statement
-                self.emit_expected_token(&[
-                    TokenKind::SemiColon,
-                    TokenKind::NewLine,
-                    TokenKind::Commentary,
-                    TokenKind::Comma,
-                ]);
+                self.emit_expected_token(&eos_or(&[TokenKind::Comma]));
 
                 // advance to end
                 self.take_until_eos();
@@ -1214,6 +1230,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         if is_rename {
             panic!("Internal compiler error: rename list not implemented!");
             self.arena.renames.alloc_extend(std::iter::from_fn(|| None));
+
+            self.unimplemented(start_span)
         } else {
             debug_assert_eq!(TokenKind::Colon, self.peek().unwrap().kind);
 
@@ -1222,16 +1240,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
             let mut first = true;
 
-            self.arena.onlys.alloc_extend(std::iter::from_fn(|| {
+            let onlys = self.arena.onlys.alloc_extend(std::iter::from_fn(|| {
                 if !first {
-                    match self.peek() {
-                        Some(Token {
+                    match self.peek()? {
+                        Token {
                             kind: TokenKind::Comma,
                             ..
-                        }) => {
+                        } => {
                             self.bump();
                         }
-                        Some(t) if Self::is_eos(t) => {
+                        t if Self::is_eos(t) => {
+                            self.bump();
                             return None;
                         }
                         _ => panic!(
@@ -1243,9 +1262,20 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 first = false;
                 self.only()
             }));
-        }
 
-        self.unimplemented(start_span)
+            Stmt {
+                kind: StmtKind::Use {
+                    module_nature,
+                    name,
+                    imports: ModuleImportList::OnlyList(onlys),
+                },
+                span: Span {
+                    file_id: self.file_id,
+                    start: start_span.start,
+                    end,
+                },
+            }
+        }
     }
 
     /// Parses a submodule statement
@@ -1405,4 +1435,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         Some(stmt)
     }
+}
+
+fn eos_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
+    let mut vec = Vec::with_capacity(3 + tokens.len());
+
+    vec.extend_from_slice(&[
+        TokenKind::SemiColon,
+        TokenKind::NewLine,
+        TokenKind::Commentary,
+    ]);
+    vec.extend_from_slice(tokens);
+
+    vec
 }
