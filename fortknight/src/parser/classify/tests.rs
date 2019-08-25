@@ -6,8 +6,8 @@ use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::intern::StringInterner;
 use crate::parser::classify::statements::{
-    DefinedOperator, GenericSpec, ModuleImportList, ModuleNature, Only, ParentIdentifier, Rename,
-    Spanned,
+    DefinedIoGenericSpec, DefinedOperator, GenericSpec, ModuleImportList, ModuleNature, Only,
+    ParentIdentifier, Rename, Spanned,
 };
 use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
@@ -411,6 +411,123 @@ fn use_statement() {
             Spanned::new(
                 Only::GenericSpec(GenericSpec::Assignment),
                 test_span(79, 92),
+            ),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : read(formatted)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![Spanned::new(
+            Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                DefinedIoGenericSpec::ReadFormatted,
+            )),
+            test_span(34, 49),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : read(formatted), read(unformatted), &
+                write(formatted), write(unformatted)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::ReadFormatted,
+                )),
+                test_span(34, 49),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::ReadUnformatted,
+                )),
+                test_span(51, 68),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::WriteFormatted,
+                )),
+                test_span(88, 104),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::WriteUnformatted,
+                )),
+                test_span(106, 124),
+            ),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::OnlyList(&expected_onlys)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, only : READ(FORMATTED), READ(UNFORMATTED), &
+                WRITE(FORMATTED), WRITE(UNFORMATTED)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_onlys = vec![
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::ReadFormatted,
+                )),
+                test_span(34, 49),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::ReadUnformatted,
+                )),
+                test_span(51, 68),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::WriteFormatted,
+                )),
+                test_span(88, 104),
+            ),
+            Spanned::new(
+                Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
+                    DefinedIoGenericSpec::WriteUnformatted,
+                )),
+                test_span(106, 124),
             ),
         ];
 
