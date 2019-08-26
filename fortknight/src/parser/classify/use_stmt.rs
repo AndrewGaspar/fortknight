@@ -314,6 +314,44 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
+    /// Parse the RHS of a rename (e.g. the "to" in "from => to")
+    fn rename_rhs(&mut self, from: &Token, start_span: Span) -> Option<Spanned<Rename>> {
+        match self.peek() {
+            Some(to) if to.is_name() => {
+                let to = self.bump().unwrap();
+
+                let from = from
+                    .try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap();
+
+                let end = to.span.end;
+                let to = to
+                    .try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap();
+
+                Some(Spanned::new(
+                    Rename::Name { from, to },
+                    Span {
+                        file_id: self.file_id,
+                        start: start_span.start,
+                        end,
+                    },
+                ))
+            }
+            _ => {
+                self.emit_expected_token(&[TokenKind::Name]);
+
+                self.only_skip_to_next()?;
+                None
+            }
+        }
+    }
+
+    /// Expects that we're at a `rename` element.
+    fn rename(&mut self) -> Option<Spanned<Rename>> {
+        panic!()
+    }
+
     /// Expects that we're at an `only`, but have not yet consumed any tokens of it. Will consume
     /// the `only` all the way up to the comma or EOS
     fn only(&mut self) -> Option<Spanned<Only>> {
@@ -604,34 +642,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                     }
                 }
-                WhatIsIt::Rename => match self.peek() {
-                    Some(t2) if t2.is_name() => {
-                        let t2 = self.bump().unwrap();
-
-                        let from = t
-                            .try_intern_contents(&mut self.interner, &self.text)
-                            .unwrap();
-                        let to = t2
-                            .try_intern_contents(&mut self.interner, &self.text)
-                            .unwrap();
-
-                        let end = t2.span.end;
-
-                        Spanned::new(
-                            Only::Rename(Rename::Name { from, to }),
-                            Span {
-                                file_id: self.file_id,
-                                start: start_span.start,
-                                end,
-                            },
-                        )
-                    }
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::Name]);
-
-                        self.only_skip_to_next()?;
-                        continue;
-                    }
+                WhatIsIt::Rename => match self.rename_rhs(&t, start_span) {
+                    Some(rename) => Spanned::new(Only::Rename(rename.val), rename.span),
+                    None => continue,
                 },
             });
         }
@@ -772,7 +785,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         // We need to look a couple steps ahead to figure out if we're looking at a rename-list or
         // an only-list. If we see `name =>`, then it's a rename list. If we see `only :`, then it's
-        // an on-list. We need to look ahead since `only` is also a name - if only Fortran had
+        // an only-list. We need to look ahead since `only` is also a name - if only Fortran had
         // reserved the keywords!
 
         let t = match self.bump() {
@@ -798,7 +811,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(Token {
                 kind: TokenKind::Arrow,
                 ..
-            }) => true,
+            }) => {
+                self.bump();
+                true
+            }
             Some(Token {
                 kind: TokenKind::LeftParen,
                 ..
@@ -825,10 +841,43 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         };
 
         if is_rename {
-            panic!("Internal compiler error: rename list not implemented!");
-            self.arena.renames.alloc_extend(std::iter::from_fn(|| None));
+            let renames =
+                self.arena
+                    .renames
+                    .alloc_extend(self.rename_rhs(&t, t.span).into_iter().chain(
+                        std::iter::from_fn(|| {
+                            match self.peek()? {
+                                Token {
+                                    kind: TokenKind::Comma,
+                                    ..
+                                } => {
+                                    self.bump();
+                                }
+                                t if Self::is_eos(t) => {
+                                    self.bump();
+                                    return None;
+                                }
+                                _ => panic!(
+                                    "Internal compiler error: `only` parsing didn't correctly \
+                                     proceed to the nearest comma or EOS"
+                                ),
+                            }
+                            self.rename()
+                        }),
+                    ));
 
-            self.unimplemented(start_span)
+            Stmt {
+                kind: StmtKind::Use {
+                    module_nature,
+                    name,
+                    imports: ModuleImportList::RenameList(renames),
+                },
+                span: Span {
+                    file_id: self.file_id,
+                    start: start_span.start,
+                    end,
+                },
+            }
         } else {
             debug_assert_eq!(TokenKind::Colon, self.peek().unwrap().kind);
 

@@ -540,6 +540,34 @@ fn use_statement() {
             get_stmts(&mut c)
         );
     }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, me => you",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![
+            Spanned::new(
+                Rename::Name { 
+                    from: me,
+                    to: you
+                },
+                test_span(27, 36),
+            ),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
 }
 
 fn classifier<'input, 'arena>(
