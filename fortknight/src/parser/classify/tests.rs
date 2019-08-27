@@ -549,14 +549,32 @@ fn use_statement() {
             &arena,
         );
 
+        let expected_renames = vec![Spanned::new(
+            Rename::Name { from: me, to: you },
+            test_span(27, 36),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, me => you, you => me",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
         let expected_renames = vec![
-            Spanned::new(
-                Rename::Name { 
-                    from: me,
-                    to: you
-                },
-                test_span(27, 36),
-            ),
+            Spanned::new(Rename::Name { from: me, to: you }, test_span(27, 36)),
+            Spanned::new(Rename::Name { from: you, to: me }, test_span(38, 47)),
         ];
 
         assert_eq!(
@@ -565,6 +583,154 @@ fn use_statement() {
                 name: foo,
                 imports: ModuleImportList::RenameList(&expected_renames)
             }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, me => you, you => me, me => you",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![
+            Spanned::new(Rename::Name { from: me, to: you }, test_span(27, 36)),
+            Spanned::new(Rename::Name { from: you, to: me }, test_span(38, 47)),
+            Spanned::new(Rename::Name { from: me, to: you }, test_span(49, 58)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, me => you, you => me, operator(.foo.) => operator(.bar.)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![
+            Spanned::new(Rename::Name { from: me, to: you }, test_span(27, 36)),
+            Spanned::new(Rename::Name { from: you, to: me }, test_span(38, 47)),
+            Spanned::new(Rename::Operator { from: foo, to: bar }, test_span(49, 83)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use, non_intrinsic :: foo, operator(.foo.) => operator(.bar.)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![Spanned::new(
+            Rename::Operator { from: foo, to: bar },
+            test_span(27, 61),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::NonIntrinsic,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use foo, operator(.foo.) => operator(.bar.)",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![Spanned::new(
+            Rename::Operator { from: foo, to: bar },
+            test_span(9, 43),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::Unspecified,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("use foo, me => you", &sink, &mut interner, &arena);
+
+        let expected_renames = vec![Spanned::new(
+            Rename::Name { from: me, to: you },
+            test_span(9, 18),
+        )];
+
+        assert_eq!(
+            vec![StmtKind::Use {
+                module_nature: ModuleNature::Unspecified,
+                name: foo,
+                imports: ModuleImportList::RenameList(&expected_renames)
+            }],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "use foo, me => you\n\
+             use bar, you => me",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        let expected_renames = vec![Spanned::new(
+            Rename::Name { from: me, to: you },
+            test_span(9, 18),
+        )];
+
+        let expected_bar_renames = vec![Spanned::new(
+            Rename::Name { from: you, to: me },
+            test_span(28, 37),
+        )];
+
+        assert_eq!(
+            vec![
+                StmtKind::Use {
+                    module_nature: ModuleNature::Unspecified,
+                    name: foo,
+                    imports: ModuleImportList::RenameList(&expected_renames)
+                },
+                StmtKind::Use {
+                    module_nature: ModuleNature::Unspecified,
+                    name: bar,
+                    imports: ModuleImportList::RenameList(&expected_bar_renames)
+                }
+            ],
             get_stmts(&mut c)
         );
     }

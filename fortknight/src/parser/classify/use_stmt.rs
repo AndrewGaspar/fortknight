@@ -314,15 +314,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
-    /// Parse the RHS of a rename (e.g. the "to" in "from => to")
-    fn rename_rhs(&mut self, from: &Token, start_span: Span) -> Option<Spanned<Rename>> {
+    /// Parse the RHS of a non-operator rename (e.g. the "to" in "from => to"). Returns None and
+    /// progresses to the next comma or EOS if the upcoming token isn't a name.
+    fn rename_rhs(&mut self, from: InternedName, start_span: Span) -> Option<Spanned<Rename>> {
         match self.peek() {
             Some(to) if to.is_name() => {
                 let to = self.bump().unwrap();
-
-                let from = from
-                    .try_intern_contents(&mut self.interner, &self.text)
-                    .unwrap();
 
                 let end = to.span.end;
                 let to = to
@@ -347,9 +344,137 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
+    /// Parse the RHS of an operator rename (e.g. the "operator(.to.)" in
+    /// "operator(.from.) => operator(.to.)"). Returns None and progresses to the next comma or EOS
+    /// if the upcoming token isn't a name.
+    fn rename_operator_rhs(
+        &mut self,
+        from: InternedName,
+        start_span: Span,
+    ) -> Option<Spanned<Rename>> {
+        // consume arrow
+        self.bump().unwrap();
+
+        let operator_name = self.user_defined_operator().ok()?;
+
+        Some(Spanned::new(
+            Rename::Operator {
+                from,
+                to: operator_name.val,
+            },
+            Span {
+                file_id: self.file_id,
+                start: start_span.start,
+                end: operator_name.span.end,
+            },
+        ))
+    }
+
     /// Expects that we're at a `rename` element.
     fn rename(&mut self) -> Option<Spanned<Rename>> {
-        panic!()
+        loop {
+            let t = match self.peek()? {
+                t if t.is_name() => self.bump().unwrap(),
+                _ => {
+                    self.emit_expected_token(&[
+                        TokenKind::Name,
+                        TokenKind::Keyword(KeywordTokenKind::Operator),
+                    ]);
+
+                    self.only_skip_to_next()?;
+                    continue;
+                }
+            };
+
+            let kind = t.kind;
+            let start_span = t.span;
+
+            match self.peek() {
+                Some(Token {
+                    kind: TokenKind::Arrow,
+                    ..
+                }) => {
+                    self.bump();
+
+                    let name = t
+                        .try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap();
+
+                    match self.rename_rhs(name, start_span) {
+                        Some(rename) => return Some(rename),
+                        None => continue,
+                    }
+                }
+                Some(Token {
+                    kind: TokenKind::LeftParen,
+                    ..
+                }) if kind == TokenKind::Keyword(KeywordTokenKind::Operator) => {
+                    self.bump();
+
+                    let name = match self.peek() {
+                        Some(Token {
+                            kind: TokenKind::DefinedOperator,
+                            ..
+                        }) => self
+                            .bump()
+                            .unwrap()
+                            .try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                        _ => {
+                            self.emit_expected_token(&[TokenKind::DefinedOperator]);
+
+                            self.only_skip_to_next()?;
+                            continue;
+                        }
+                    };
+
+                    match self.peek() {
+                        Some(Token {
+                            kind: TokenKind::RightParen,
+                            ..
+                        }) => {
+                            self.bump();
+                        }
+                        _ => {
+                            self.emit_expected_token(&[TokenKind::RightParen]);
+
+                            self.only_skip_to_next()?;
+                            continue;
+                        }
+                    };
+
+                    match self.peek() {
+                        Some(Token {
+                            kind: TokenKind::Arrow,
+                            ..
+                        }) => {
+                            // rename_operator_rhs consumes the arrow
+                        }
+                        _ => {
+                            self.emit_expected_token(&[TokenKind::Arrow]);
+
+                            self.only_skip_to_next()?;
+                            continue;
+                        }
+                    };
+
+                    match self.rename_operator_rhs(name, start_span) {
+                        Some(rename) => return Some(rename),
+                        _ => continue,
+                    }
+                }
+                _ => {
+                    if kind == TokenKind::Keyword(KeywordTokenKind::Operator) {
+                        self.emit_expected_token(&[TokenKind::Arrow, TokenKind::LeftParen]);
+                    } else {
+                        self.emit_expected_token(&[TokenKind::Arrow]);
+                    }
+
+                    self.only_skip_to_next()?;
+                    continue;
+                }
+            };
+        }
     }
 
     /// Expects that we're at an `only`, but have not yet consumed any tokens of it. Will consume
@@ -504,27 +629,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             kind: TokenKind::Arrow,
                             ..
                         }) if user_defined_operator.is_some() => {
-                            // consume arrow
-                            self.bump().unwrap();
-
-                            let operator_name = match self.user_defined_operator() {
-                                Ok(operator_name) => operator_name,
-                                Err(TakeUntil::Continue) => continue,
-                                Err(TakeUntil::Stop) => return None,
-                                _ => panic!(),
+                            let rename = match self
+                                .rename_operator_rhs(user_defined_operator.unwrap(), start_span)
+                            {
+                                Some(rename) => rename,
+                                _ => continue,
                             };
-
-                            Spanned::new(
-                                Only::Rename(Rename::Operator {
-                                    from: user_defined_operator.unwrap(),
-                                    to: operator_name.val,
-                                }),
-                                Span {
-                                    file_id: self.file_id,
-                                    start: start_span.start,
-                                    end: operator_name.span.end,
-                                },
-                            )
+                            Spanned::new(Only::Rename(rename.val), rename.span)
                         }
                         _ => {
                             if user_defined_operator.is_some() {
@@ -642,10 +753,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                     }
                 }
-                WhatIsIt::Rename => match self.rename_rhs(&t, start_span) {
-                    Some(rename) => Spanned::new(Only::Rename(rename.val), rename.span),
-                    None => continue,
-                },
+                WhatIsIt::Rename => {
+                    let name = t
+                        .try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap();
+                    match self.rename_rhs(name, start_span) {
+                        Some(rename) => Spanned::new(Only::Rename(rename.val), rename.span),
+                        None => continue,
+                    }
+                }
             });
         }
     }
@@ -805,24 +921,71 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
+        enum WhatIsIt {
+            NameRename(InternedName),
+            OperatorRename(InternedName),
+            OnlyList,
+        };
+
         // Determine if we're in a rename list or an only list
-        let is_rename = match self.peek() {
+        let what_is_it = match self.peek() {
             // Can be either an arrow OR ( in cases when previous token is OPERATOR
             Some(Token {
                 kind: TokenKind::Arrow,
                 ..
             }) => {
                 self.bump();
-                true
+                WhatIsIt::NameRename(
+                    t.try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                )
             }
             Some(Token {
                 kind: TokenKind::LeftParen,
                 ..
-            }) if t.kind == TokenKind::Keyword(KeywordTokenKind::Operator) => true,
+            }) if t.kind == TokenKind::Keyword(KeywordTokenKind::Operator) => {
+                self.bump();
+
+                let name = match self.peek() {
+                    Some(Token {
+                        kind: TokenKind::DefinedOperator,
+                        ..
+                    }) => self
+                        .bump()
+                        .unwrap()
+                        .try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                    _ => {
+                        self.emit_expected_token(&[TokenKind::DefinedOperator]);
+
+                        self.take_until_eos();
+
+                        return unspecified_use;
+                    }
+                };
+
+                match self.peek() {
+                    Some(Token {
+                        kind: TokenKind::RightParen,
+                        ..
+                    }) => {
+                        self.bump();
+                    }
+                    _ => {
+                        self.emit_expected_token(&[TokenKind::RightParen]);
+
+                        self.take_until_eos();
+
+                        return unspecified_use;
+                    }
+                };
+
+                WhatIsIt::OperatorRename(name)
+            }
             Some(Token {
                 kind: TokenKind::Colon,
                 ..
-            }) if t.kind == TokenKind::Keyword(KeywordTokenKind::Only) => false,
+            }) if t.kind == TokenKind::Keyword(KeywordTokenKind::Only) => WhatIsIt::OnlyList,
             _ => {
                 // On unexpected token, emit an error, but still return a statement
                 if t.kind == TokenKind::Keyword(KeywordTokenKind::Operator) {
@@ -840,12 +1003,25 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        if is_rename {
-            let renames =
-                self.arena
-                    .renames
-                    .alloc_extend(self.rename_rhs(&t, t.span).into_iter().chain(
-                        std::iter::from_fn(|| {
+        enum FirstRenameOrOnly {
+            Rename(Option<Spanned<Rename>>),
+            Only,
+        };
+
+        let first_rename_or_only = match what_is_it {
+            WhatIsIt::NameRename(name) => FirstRenameOrOnly::Rename(self.rename_rhs(name, t.span)),
+            WhatIsIt::OperatorRename(name) => {
+                FirstRenameOrOnly::Rename(self.rename_operator_rhs(name, t.span))
+            }
+            WhatIsIt::OnlyList => FirstRenameOrOnly::Only,
+        };
+
+        match first_rename_or_only {
+            FirstRenameOrOnly::Rename(first) => {
+                let renames =
+                    self.arena
+                        .renames
+                        .alloc_extend(first.into_iter().chain(std::iter::from_fn(|| {
                             match self.peek()? {
                                 Token {
                                     kind: TokenKind::Comma,
@@ -863,63 +1039,64 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                                 ),
                             }
                             self.rename()
-                        }),
-                    ));
+                        })));
 
-            Stmt {
-                kind: StmtKind::Use {
-                    module_nature,
-                    name,
-                    imports: ModuleImportList::RenameList(renames),
-                },
-                span: Span {
-                    file_id: self.file_id,
-                    start: start_span.start,
-                    end,
-                },
-            }
-        } else {
-            debug_assert_eq!(TokenKind::Colon, self.peek().unwrap().kind);
-
-            // consume :
-            self.bump().unwrap();
-
-            let mut first = true;
-
-            let onlys = self.arena.onlys.alloc_extend(std::iter::from_fn(|| {
-                if !first {
-                    match self.peek()? {
-                        Token {
-                            kind: TokenKind::Comma,
-                            ..
-                        } => {
-                            self.bump();
-                        }
-                        t if Self::is_eos(t) => {
-                            self.bump();
-                            return None;
-                        }
-                        _ => panic!(
-                            "Internal compiler error: `only` parsing didn't correctly proceed to \
-                             the nearest comma or EOS"
-                        ),
-                    }
+                Stmt {
+                    kind: StmtKind::Use {
+                        module_nature,
+                        name,
+                        imports: ModuleImportList::RenameList(renames),
+                    },
+                    span: Span {
+                        file_id: self.file_id,
+                        start: start_span.start,
+                        end,
+                    },
                 }
-                first = false;
-                self.only()
-            }));
+            }
+            FirstRenameOrOnly::Only => {
+                debug_assert_eq!(TokenKind::Colon, self.peek().unwrap().kind);
 
-            Stmt {
-                kind: StmtKind::Use {
-                    module_nature,
-                    name,
-                    imports: ModuleImportList::OnlyList(onlys),
-                },
-                span: Span {
-                    file_id: self.file_id,
-                    start: start_span.start,
-                    end,
-                },
+                // consume :
+                self.bump().unwrap();
+
+                let mut first = true;
+
+                let onlys = self.arena.onlys.alloc_extend(std::iter::from_fn(|| {
+                    if !first {
+                        match self.peek()? {
+                            Token {
+                                kind: TokenKind::Comma,
+                                ..
+                            } => {
+                                self.bump();
+                            }
+                            t if Self::is_eos(t) => {
+                                self.bump();
+                                return None;
+                            }
+                            _ => panic!(
+                                "Internal compiler error: `only` parsing didn't correctly proceed to \
+                                the nearest comma or EOS"
+                            ),
+                        }
+                    }
+                    first = false;
+                    self.only()
+                }));
+
+                Stmt {
+                    kind: StmtKind::Use {
+                        module_nature,
+                        name,
+                        imports: ModuleImportList::OnlyList(onlys),
+                    },
+                    span: Span {
+                        file_id: self.file_id,
+                        start: start_span.start,
+                        end,
+                    },
+                }
             }
         }
     }
