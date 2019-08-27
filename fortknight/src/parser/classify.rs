@@ -10,6 +10,7 @@ use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
+mod import_stmt;
 mod statements;
 mod use_stmt;
 
@@ -34,6 +35,7 @@ pub enum TakeUntil {
 pub struct ClassifierArena {
     onlys: Arena<Spanned<Only>>,
     renames: Arena<Spanned<Rename>>,
+    names: Arena<Spanned<InternedName>>,
 }
 
 impl ClassifierArena {
@@ -560,10 +562,41 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             TokenKind::Keyword(KeywordTokenKind::Submodule) => self.submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
+            TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 
         Some(stmt)
+    }
+
+    /// Called when there's an error parsing some comma separated list - attempt to skip to the next
+    /// item in the list, or to the end. Returns Some(()) when reaching a comma, returns None when
+    /// reached EOS.
+    ///
+    /// The comma/EOS is consumed
+    fn skip_to_comma_or_eos(&mut self) -> Option<()> {
+        // advance to next `only` or EOS
+        self.take_until(|lookahead| match lookahead {
+            Lookahead::Token(&Token {
+                kind: TokenKind::Comma,
+                ..
+            }) => TakeUntil::Stop,
+            Lookahead::Token(t) if Self::is_eos(t) => TakeUntil::Stop,
+            Lookahead::EOF => TakeUntil::Stop,
+            _ => TakeUntil::Continue,
+        })
+        .unwrap();
+
+        // bumps the final token so that we're either ready to parse the next only or the next
+        // statement
+        self.bump();
+
+        match self.peek() {
+            Some(t) if Self::is_eos(t) => None,
+            None => None,
+            // Consume the comma so we're ready to parse the next potential "only"
+            _ => Some(()),
+        }
     }
 }
 

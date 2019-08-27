@@ -6,8 +6,8 @@ use crate::error::DiagnosticSink;
 use crate::index::FileId;
 use crate::intern::StringInterner;
 use crate::parser::classify::statements::{
-    DefinedIoGenericSpec, DefinedOperator, GenericSpec, ModuleImportList, ModuleNature, Only,
-    ParentIdentifier, Rename, Spanned,
+    DefinedIoGenericSpec, DefinedOperator, GenericSpec, ImportStmt, ModuleImportList, ModuleNature,
+    Only, ParentIdentifier, Rename, Spanned,
 };
 use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
@@ -731,6 +731,135 @@ fn use_statement() {
                     imports: ModuleImportList::RenameList(&expected_bar_renames)
                 }
             ],
+            get_stmts(&mut c)
+        );
+    }
+}
+
+#[test]
+fn imports() {
+    let mut interner = StringInterner::new();
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let arena = ClassifierArena::new();
+
+    let you = interner.intern_name("you".into());
+    let me = interner.intern_name("me".into());
+
+    {
+        let mut c = classifier("import", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoSpecifier(&[]))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import, all", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::AllSpecifier)],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import, none", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoneSpecifier)],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import, only : me", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![Spanned::new(me, test_span(15, 17))];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::OnlySpecifier(
+                &expected_imports
+            ))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import, only : me, you", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![
+            Spanned::new(me, test_span(15, 17)),
+            Spanned::new(you, test_span(19, 22)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::OnlySpecifier(
+                &expected_imports
+            ))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import, only : me", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![Spanned::new(me, test_span(15, 17))];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::OnlySpecifier(
+                &expected_imports
+            ))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import me", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![Spanned::new(me, test_span(7, 9))];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoSpecifier(&expected_imports))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import me, you", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![
+            Spanned::new(me, test_span(7, 9)),
+            Spanned::new(you, test_span(11, 14)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoSpecifier(&expected_imports))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import :: me", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![Spanned::new(me, test_span(10, 12))];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoSpecifier(&expected_imports))],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("import :: me, you", &sink, &mut interner, &arena);
+
+        let expected_imports = vec![
+            Spanned::new(me, test_span(10, 12)),
+            Spanned::new(you, test_span(14, 17)),
+        ];
+
+        assert_eq!(
+            vec![StmtKind::Import(ImportStmt::NoSpecifier(&expected_imports))],
             get_stmts(&mut c)
         );
     }

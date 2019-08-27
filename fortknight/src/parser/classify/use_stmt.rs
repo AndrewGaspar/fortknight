@@ -3,35 +3,9 @@ use crate::parser::lex::{KeywordTokenKind, Token, TokenKind};
 use crate::span::Span;
 
 use super::statements::{self, DefinedOperator, Only, Rename, Spanned, Stmt, StmtKind};
-use super::{eos_or, Classifier, Lookahead, TakeUntil};
+use super::{eos_or, Classifier, TakeUntil};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
-    /// Called when there's an error parsing an only - attempt to skip to the next only in the list
-    fn only_skip_to_next(&mut self) -> Option<()> {
-        // advance to next `only` or EOS
-        self.take_until(|lookahead| match lookahead {
-            Lookahead::Token(&Token {
-                kind: TokenKind::Comma,
-                ..
-            }) => TakeUntil::Stop,
-            Lookahead::Token(t) if Self::is_eos(t) => TakeUntil::Stop,
-            Lookahead::EOF => TakeUntil::Stop,
-            _ => TakeUntil::Continue,
-        })
-        .unwrap();
-
-        // bumps the final token so that we're either ready to parse the next only or the next
-        // statement
-        self.bump();
-
-        match self.peek() {
-            Some(t) if Self::is_eos(t) => None,
-            None => None,
-            // Consume the comma so we're ready to parse the next potential "only"
-            _ => Some(()),
-        }
-    }
-
     /// Parses defined operator from everything after `OPERATOR (`
     fn rest_of_defined_operator(
         &mut self,
@@ -193,7 +167,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     TokenKind::NotEquivalentOp,
                 ]);
 
-                return Err(if self.only_skip_to_next().is_none() {
+                return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -222,7 +196,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::RightParen]);
 
-                Err(if self.only_skip_to_next().is_none() {
+                Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -240,7 +214,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::Keyword(KeywordTokenKind::Operator)]);
 
-                return Err(if self.only_skip_to_next().is_none() {
+                return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -258,7 +232,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::LeftParen]);
 
-                return Err(if self.only_skip_to_next().is_none() {
+                return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -278,7 +252,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::DefinedOperator]);
 
-                return Err(if self.only_skip_to_next().is_none() {
+                return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -305,7 +279,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::RightParen]);
 
-                return Err(if self.only_skip_to_next().is_none() {
+                return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -338,7 +312,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {
                 self.emit_expected_token(&[TokenKind::Name]);
 
-                self.only_skip_to_next()?;
+                self.skip_to_comma_or_eos()?;
                 None
             }
         }
@@ -381,7 +355,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         TokenKind::Keyword(KeywordTokenKind::Operator),
                     ]);
 
-                    self.only_skip_to_next()?;
+                    self.skip_to_comma_or_eos()?;
                     continue;
                 }
             };
@@ -423,7 +397,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         _ => {
                             self.emit_expected_token(&[TokenKind::DefinedOperator]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     };
@@ -438,7 +412,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         _ => {
                             self.emit_expected_token(&[TokenKind::RightParen]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     };
@@ -453,7 +427,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         _ => {
                             self.emit_expected_token(&[TokenKind::Arrow]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     };
@@ -470,7 +444,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         self.emit_expected_token(&[TokenKind::Arrow]);
                     }
 
-                    self.only_skip_to_next()?;
+                    self.skip_to_comma_or_eos()?;
                     continue;
                 }
             };
@@ -496,7 +470,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         TokenKind::Keyword(KeywordTokenKind::Write),
                     ]);
 
-                    self.only_skip_to_next()?;
+                    self.skip_to_comma_or_eos()?;
                     continue;
                 }
             };
@@ -546,7 +520,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             // arrow
                             self.emit_expected_token(&[TokenKind::Comma, TokenKind::Arrow]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     }
@@ -590,7 +564,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 _ => {
                     self.emit_expected_token(&[TokenKind::Arrow, TokenKind::Comma]);
 
-                    self.only_skip_to_next()?;
+                    self.skip_to_comma_or_eos()?;
                     continue;
                 }
             };
@@ -647,7 +621,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                                 self.emit_expected_token(&eos_or(&[TokenKind::Comma]));
                             }
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     }
@@ -662,7 +636,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                         _ => {
                             self.emit_expected_token(&[TokenKind::Equals]);
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     };
@@ -686,7 +660,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         _ => {
                             self.emit_expected_token(&[TokenKind::RightParen]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     }
@@ -719,7 +693,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                                 TokenKind::Keyword(KeywordTokenKind::Unformatted),
                             ]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     };
@@ -748,7 +722,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         _ => {
                             self.emit_expected_token(&[TokenKind::RightParen]);
 
-                            self.only_skip_to_next()?;
+                            self.skip_to_comma_or_eos()?;
                             continue;
                         }
                     }

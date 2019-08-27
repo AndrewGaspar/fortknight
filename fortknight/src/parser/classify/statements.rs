@@ -49,6 +49,15 @@ pub enum DefinedOperator {
     ExtendedIntrinsicOp(IntrinsicOperator),
 }
 
+/// R867: import-stmt
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ImportStmt<'a> {
+    NoSpecifier(&'a [Spanned<InternedName>]),
+    OnlySpecifier(&'a [Spanned<InternedName>]),
+    AllSpecifier,
+    NoneSpecifier,
+}
+
 /// R1007: power-op is **
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct PowerOp;
@@ -206,6 +215,13 @@ pub enum StmtKind<'a> {
     // Bare statements
     /// Bare end statement - just `end`
     End,
+
+    /// R867: import-stmt
+    ///     is IMPORT [ [ :: ] import-name-list ]
+    ///     or IMPORT, ONLY : import-name-list
+    ///     or IMPORT, NONE
+    ///     or IMPORT, ALL
+    Import(ImportStmt<'a>),
 
     /// R1402: program-stmt is `program name?`
     Program { name: Option<Spanned<InternedName>> },
