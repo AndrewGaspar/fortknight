@@ -550,6 +550,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
+    /// Parses a contains-stmt after the contains
+    fn contains(&mut self, start_span: Span) -> Stmt<'arena> {
+        self.expect_eos();
+
+        Stmt {
+            kind: StmtKind::Contains,
+            span: start_span,
+        }
+    }
+
     pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
         let token = self.tokenizer.next()?;
 
@@ -563,6 +573,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
+            TokenKind::Keyword(KeywordTokenKind::Contains) => self.contains(token.span),
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 

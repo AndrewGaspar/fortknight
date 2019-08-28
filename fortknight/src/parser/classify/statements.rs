@@ -251,6 +251,10 @@ pub enum StmtKind<'a> {
     /// R1419: end-submodule-stmt is `end submodule name?` or `endsubmodule name?`
     EndSubmodule { name: Option<Spanned<InternedName>> },
 
+    /// R1543: contains-stmt is CONTAINS
+    Contains,
+
+
     /// Error
     Unclassifiable,
 }
