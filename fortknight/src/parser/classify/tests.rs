@@ -13,6 +13,8 @@ use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
 use crate::span::Span;
 
+mod block_tests;
+
 #[test]
 fn program() {
     use StmtKind::*;
@@ -865,7 +867,7 @@ fn imports() {
     }
 }
 
-fn classifier<'input, 'arena>(
+pub(crate) fn classifier<'input, 'arena>(
     text: &'input str,
     sink: &'input RefCell<DiagnosticSink>,
     interner: &'input mut StringInterner,
@@ -881,7 +883,7 @@ fn classifier<'input, 'arena>(
     )
 }
 
-fn get_stmts<'a>(classifier: &'_ mut Classifier<'_, 'a>) -> Vec<StmtKind<'a>> {
+pub(crate) fn get_stmts<'a>(classifier: &'_ mut Classifier<'_, 'a>) -> Vec<StmtKind<'a>> {
     let mut stmts = vec![];
 
     while let Some(stmt) = classifier.next_stmt() {
@@ -891,7 +893,7 @@ fn get_stmts<'a>(classifier: &'_ mut Classifier<'_, 'a>) -> Vec<StmtKind<'a>> {
     stmts
 }
 
-fn test_span(start: u32, end: u32) -> Span {
+pub(crate) fn test_span(start: u32, end: u32) -> Span {
     Span {
         file_id: FileId(0),
         start,

@@ -223,6 +223,14 @@ pub enum StmtKind<'a> {
     ///     or IMPORT, ALL
     Import(ImportStmt<'a>),
 
+    /// R1108: block-stmt
+    ///     is [ block-construct-name : ] BLOCK
+    Block { name: Option<Spanned<InternedName>> },
+
+    /// R1110: end-block-stmt
+    ///     is END BLOCK [ block-construct-name ]
+    EndBlock { name: Option<Spanned<InternedName>> },
+
     /// R1402: program-stmt is `program name?`
     Program { name: Option<Spanned<InternedName>> },
     /// R1403: end-program-stmt is `end program name?` or `endprogram name?`
@@ -251,9 +259,16 @@ pub enum StmtKind<'a> {
     /// R1419: end-submodule-stmt is `end submodule name?` or `endsubmodule name?`
     EndSubmodule { name: Option<Spanned<InternedName>> },
 
+    /// R1421: block-data-stmt
+    ///     is BLOCK DATA [ block-data-name ]
+    BlockData { name: Option<Spanned<InternedName>> },
+
+    /// R1422: end-block-data-stmt
+    ///     is END [ BLOCK DATA [ block-data-name ] ]
+    EndBlockData { name: Option<Spanned<InternedName>> },
+
     /// R1543: contains-stmt is CONTAINS
     Contains,
-
 
     /// Error
     Unclassifiable,

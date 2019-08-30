@@ -10,6 +10,7 @@ use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
+mod block;
 mod import_stmt;
 mod statements;
 mod use_stmt;
@@ -540,6 +541,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 self.bump();
                 self.end_submodule(start_span)
             }
+            TokenKind::Keyword(KeywordTokenKind::Block) => {
+                let span = self.bump().unwrap().span;
+                self.stmt_from_end_block(start_span.concat(span))
+            }
+            TokenKind::Keyword(KeywordTokenKind::BlockData) => {
+                let span = self.bump().unwrap().span;
+                self.stmt_from_end_block_data(start_span.concat(span))
+            }
             _ => {
                 self.expect_eos();
                 Stmt {
@@ -574,6 +583,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
             TokenKind::Keyword(KeywordTokenKind::Contains) => self.contains(token.span),
+            TokenKind::Keyword(KeywordTokenKind::Block) => self.stmt_from_block(token.span),
+            TokenKind::Keyword(KeywordTokenKind::BlockData) => {
+                self.stmt_from_block_data(token.span)
+            }
+            TokenKind::Keyword(KeywordTokenKind::EndBlock) => self.stmt_from_end_block(token.span),
+            TokenKind::Keyword(KeywordTokenKind::EndBlockData) => {
+                self.stmt_from_end_block_data(token.span)
+            }
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 
