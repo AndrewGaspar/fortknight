@@ -740,7 +740,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
-    pub(crate) fn use_statement(&mut self, start_span: &Span) -> Stmt<'arena> {
+    pub(super) fn use_statement(&mut self, start_span: &Span) -> Stmt<'arena> {
         use statements::{ModuleImportList, ModuleNature};
 
         let (module_nature, name, end) = match self.peek() {

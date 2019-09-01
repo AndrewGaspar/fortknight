@@ -6,7 +6,7 @@ use super::statements::{ImportStmt, Spanned, Stmt, StmtKind};
 use super::{eos_or, Classifier};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
-    pub(crate) fn import_statement(&mut self, start_span: Span) -> Stmt<'arena> {
+    pub(super) fn import_statement(&mut self, start_span: Span) -> Stmt<'arena> {
         match self.peek() {
             Some(Token {
                 kind: TokenKind::Comma,
