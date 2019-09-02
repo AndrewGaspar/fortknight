@@ -3,6 +3,7 @@ use std::iter::Iterator;
 use std::str::CharIndices;
 
 use num_traits::FromPrimitive;
+use peek_nth::{IteratorExt, PeekableNth};
 
 use self::TakeUntil::*;
 
@@ -31,8 +32,7 @@ pub struct Tokenizer<'input> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
-    chars: CharIndices<'input>,
-    lookahead: Lookahead,
+    chars: PeekableNth<CharIndices<'input>>,
     tokenize_preprocessor: bool,
 }
 
@@ -61,16 +61,13 @@ impl<'input> Tokenizer<'input> {
             "Fortknight only supports a maximum of 4GB files."
         );
 
-        let mut t = Tokenizer {
+        Tokenizer {
             file_id,
             text,
             diagnostics,
-            chars: text.char_indices(),
-            lookahead: Lookahead::EOF,
+            chars: text.char_indices().peekable_nth(),
             tokenize_preprocessor: options.tokenize_preprocessor,
-        };
-        t.bump();
-        t
+        }
     }
 
     fn lookahead_idx(&self, lookahead: Lookahead) -> u32 {
@@ -259,7 +256,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn finish_exponent(&mut self, idx0: u32) -> Token {
-        if let Lookahead::Character(idx1, '+') | Lookahead::Character(idx1, '-') = self.lookahead {
+        if let Lookahead::Character(idx1, '+') | Lookahead::Character(idx1, '-') = self.peek() {
             self.bump();
             if !self.skip_continuation() {
                 self.emit_error(
@@ -272,7 +269,7 @@ impl<'input> Tokenizer<'input> {
             }
         }
 
-        match self.lookahead {
+        match self.peek() {
             Lookahead::Character(_, c) if is_digit(c) => {
                 let idx1 = self.take_digit_string(idx0);
                 self.token(TokenKind::RealLiteralConstant, idx0, idx1)
@@ -290,7 +287,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn finish_real_literal_constant(&mut self, idx0: u32) -> Token {
-        match self.lookahead {
+        match self.peek() {
             Lookahead::Character(idx1, c) if is_exponent_letter(c) => {
                 self.bump();
                 if !self.skip_continuation() {
@@ -314,7 +311,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn decimal(&mut self, idx0: u32) -> Token {
-        debug_assert!(match self.lookahead {
+        debug_assert!(match self.peek() {
             Lookahead::Character(_, c) if is_digit(c) => true,
             _ => false,
         });
@@ -328,13 +325,13 @@ impl<'input> Tokenizer<'input> {
     fn numberish(&mut self, idx0: u32) -> Token {
         let idx1 = self.take_digit_string(idx0);
 
-        match self.lookahead {
+        match self.peek() {
             Lookahead::Character(idx1, '.') => {
                 self.bump();
                 if !self.skip_continuation() {
                     self.token(TokenKind::RealLiteralConstant, idx0, idx1)
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
                         Lookahead::Character(_, c) if is_exponent_letter(c) => {
                             self.finish_real_literal_constant(idx0)
@@ -378,7 +375,7 @@ impl<'input> Tokenizer<'input> {
             .expect("Internal compiler error: Commentary never fails to terminate");
 
         // ignore the newline for commentary - commentary can be considered EOL
-        match self.lookahead {
+        match self.peek() {
             Lookahead::Character(_, c) if is_new_line_start(c) => {
                 self.consume_new_line();
             }
@@ -425,7 +422,7 @@ impl<'input> Tokenizer<'input> {
     // a new line with is_new_line_start.
     fn consume_new_line(&mut self) -> Token {
         loop {
-            return match self.lookahead {
+            return match self.peek() {
                 Lookahead::Character(idx0, '\n') => {
                     self.bump();
                     self.token(TokenKind::NewLine, idx0, idx0 + 1)
@@ -449,7 +446,7 @@ impl<'input> Tokenizer<'input> {
                         }
                     }
                 }
-                _ => panic!("self.lookahead must match a new line start"),
+                _ => panic!("self.peek() must match a new line start"),
             };
         }
     }
@@ -458,7 +455,7 @@ impl<'input> Tokenizer<'input> {
         let mut first_line = true;
 
         loop {
-            return match self.lookahead {
+            return match self.peek() {
                 Lookahead::Character(idx0, '!') => {
                     self.bump();
                     self.commentary(idx0);
@@ -520,7 +517,7 @@ impl<'input> Tokenizer<'input> {
     /// Returns None if continuation is skipped without issue. Return Some(err)
     /// if there was an issue in the continuation.
     fn skip_continuation(&mut self) -> bool {
-        if let Lookahead::Character(idx0, '&') = self.lookahead {
+        if let Lookahead::Character(idx0, '&') = self.peek() {
             self.bump();
             self.continuation(idx0)
         } else {
@@ -536,7 +533,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     self.token(TokenKind::Equals, idx0, idx0 + 1)
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, '>') => {
                             self.bump();
                             self.token(TokenKind::Arrow, idx0, idx1 + 1)
@@ -562,7 +559,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     self.token(TokenKind::Star, idx0, idx0 + 1)
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, '*') => {
                             self.bump();
                             self.token(TokenKind::StarStar, idx0, idx1 + 1)
@@ -576,7 +573,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     self.token(TokenKind::Slash, idx0, idx0 + 1)
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, '/') => {
                             self.bump();
                             self.token(TokenKind::SlashSlash, idx0, idx1 + 1)
@@ -618,7 +615,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     (self.token(TokenKind::LeftAngle, idx0, idx0 + 1))
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, '=') => {
                             self.bump();
                             (self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
@@ -632,7 +629,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     (self.token(TokenKind::RightAngle, idx0, idx0 + 1))
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, '=') => {
                             self.bump();
                             (self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
@@ -646,7 +643,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     (self.token(TokenKind::Dot, idx0, idx0 + 1))
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         // if followed by a letter, then this must be an operator
                         Lookahead::Character(_, c) if is_letter(c) => self.operator(idx0),
                         // If followed by a digit, then this must be an real literal constant
@@ -665,7 +662,7 @@ impl<'input> Tokenizer<'input> {
                 if !self.skip_continuation() {
                     (self.token(TokenKind::Colon, idx0, idx0 + 1))
                 } else {
-                    match self.lookahead {
+                    match self.peek() {
                         Lookahead::Character(idx1, ':') => {
                             self.bump();
                             (self.token(TokenKind::ColonColon, idx0, idx1 + 1))
@@ -707,7 +704,7 @@ impl<'input> Tokenizer<'input> {
 
     fn internal_next(&mut self) -> Option<Token> {
         loop {
-            return match self.lookahead {
+            return match self.peek() {
                 Lookahead::Character(_, '&') => {
                     self.skip_continuation();
                     continue;
@@ -733,15 +730,16 @@ impl<'input> Tokenizer<'input> {
         F: FnMut(Lookahead) -> TakeUntil,
     {
         loop {
-            return match self.lookahead {
+            return match self.peek() {
                 Lookahead::Character(idx1, '&') => {
                     self.bump();
                     let continue_context = self.continuation(idx0);
                     if require_continue_context && !continue_context {
+                        let lookahead = self.peek();
                         self.emit_error(
                             DiscontinuedCharacterContext,
                             idx1,
-                            self.lookahead_idx(self.lookahead),
+                            self.lookahead_idx(lookahead),
                             "Missing continuation ('&') of string literal",
                         );
                     }
@@ -770,7 +768,7 @@ impl<'input> Tokenizer<'input> {
         F: FnMut(Lookahead) -> TakeUntil,
     {
         loop {
-            return match self.lookahead {
+            return match self.peek() {
                 Lookahead::EOF => match terminate(Lookahead::EOF) {
                     Continue => panic!("Internal error: Tried to tokenize past EOF!"),
                     Stop => Ok(self.text_len()),
@@ -795,13 +793,22 @@ impl<'input> Tokenizer<'input> {
         self.take_until_terminate(idx0, false, terminate)
     }
 
+    fn peek_nth(&mut self, n: usize) -> Lookahead {
+        self.chars
+            .peek_nth(n)
+            .map(|(i, c)| Lookahead::Character(*i as u32, *c))
+            .unwrap_or(Lookahead::EOF)
+    }
+
+    fn peek(&mut self) -> Lookahead {
+        self.peek_nth(0)
+    }
+
     fn bump(&mut self) -> Lookahead {
-        self.lookahead = self
-            .chars
+        self.chars
             .next()
             .map(|(i, c)| Lookahead::Character(i as u32, c))
-            .unwrap_or(Lookahead::EOF);
-        self.lookahead
+            .unwrap_or(Lookahead::EOF)
     }
 }
 
