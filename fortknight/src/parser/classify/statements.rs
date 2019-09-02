@@ -1,4 +1,5 @@
 use crate::intern::InternedName;
+use crate::parser::lex::Letter;
 use crate::span::Span;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -47,6 +48,102 @@ pub enum IntrinsicOperator {
 pub enum DefinedOperator {
     DefinedUnaryOrBinaryOp(InternedName),
     ExtendedIntrinsicOp(IntrinsicOperator),
+}
+
+/// R701: type-param-value
+///     is scalar-int-expr
+///     or *
+///     or :
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TypeParamValue<'a> {
+    ScalarIntExpr(Expr<'a>),
+    Star,
+    Colon,
+}
+
+/// R703: declaration-type-spec
+///     is intrinsic-type-spec
+///     or TYPE ( intrinsic-type-spec )
+///     or TYPE ( derived-type-spec )
+///     or CLASS ( derived-type-spec )
+///     or CLASS ( * )
+///     or TYPE ( * )
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum DeclarationTypeSpec<'a> {
+    Intrinsic(IntrinsicTypeSpec<'a>),
+    TypeIntrinsic(IntrinsicTypeSpec<'a>),
+    TypeDerived(DerivedTypeSpec<'a>),
+    ClassDerived(DerivedTypeSpec<'a>),
+    ClassWildcard,
+    TypeWildcard,
+}
+
+/// R704: intrinsic-type-spec
+///     is integer-type-spec
+///     or REAL [ kind-selector ]
+///     or DOUBLE PRECISION
+///     or COMPLEX [ kind-selector ]
+///     or CHARACTER [ kind-selector ]
+///     or LOGICAL [ kind-selector ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum IntrinsicTypeSpec<'a> {
+    Integer(IntegerTypeSpec<'a>),
+    Real(Option<KindSelector<'a>>),
+    DoublePrecision,
+    Complex(Option<KindSelector<'a>>),
+    Character(Option<KindSelector<'a>>),
+    Logical(Option<KindSelector<'a>>),
+}
+
+/// R705: integer-type-spec is INTEGER [ kind-selector ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct IntegerTypeSpec<'a>(pub Option<KindSelector<'a>>);
+
+/// R706: kind-selector is ( [ KIND = ] scalar-int-constant-expr )
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct KindSelector<'a>(pub Expr<'a>);
+
+/// R754: derived-type-spec is type-name [ ( type-param-spec-list ) ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct DerivedTypeSpec<'a> {
+    pub name: InternedName,
+    pub spec_list: &'a [TypeParamSpec<'a>],
+}
+
+/// R755: type-param-spec is [ keyword = ] type-param-value
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct TypeParamSpec<'a> {
+    pub keyword: Option<InternedName>,
+    pub value: TypeParamValue<'a>,
+}
+
+/// R863: implicit-stmt
+///     is IMPLICIT implicit-spec-list
+///     or IMPLICIT NONE [ ( [ implicit-none-spec-list ] ) ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ImplicitStmt<'a> {
+    SpecList(&'a [Spanned<ImplicitSpec<'a>>]),
+    /// R866: implicit-none-spec
+    ///     is EXTERNAL
+    ///     or TYPE
+    NoneSpecList {
+        has_external: bool,
+        has_type: bool,
+    },
+}
+
+/// R864: implicit-spec is declaration-type-spec ( letter-spec-list )
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ImplicitSpec<'a> {
+    pub declaration_type_spec: DeclarationTypeSpec<'a>,
+    pub letter_spec_list: &'a [LetterSpec],
+}
+
+/// R865: letter-spec is letter [ - letter ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct LetterSpec {
+    pub start: Letter,
+    pub end: Option<Letter>,
 }
 
 /// R867: import-stmt
@@ -132,6 +229,11 @@ pub enum EquivOp {
     NonEquivalence,
 }
 
+/// R1022: expr is [ expr defined-binary-op ] level-5-expr
+/// TODO: Implement
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Expr<'a>(std::marker::PhantomData<&'a ()>);
+
 /// R1418: parent-identifer is ancestore-module-name [ : parent-submodule-name ]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ParentIdentifier {
@@ -215,6 +317,11 @@ pub enum StmtKind<'a> {
     // Bare statements
     /// Bare end statement - just `end`
     End,
+
+    /// R863: implicit-stmt
+    ///     is IMPLICIT implicit-spec-list
+    ///     or IMPLICIT NONE [ ( [ implicit-none-spec-list ] ) ]
+    Implicit(ImplicitStmt<'a>),
 
     /// R867: import-stmt
     ///     is IMPORT [ [ :: ] import-name-list ]

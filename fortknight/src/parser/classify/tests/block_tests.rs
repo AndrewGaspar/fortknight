@@ -1,17 +1,10 @@
-use std::cell::RefCell;
-/// Tests to verify correct statements are returned by classifier
-use std::default::Default;
+//! Tests to verify correct block-* statements are returned by classifier
 
 use crate::error::DiagnosticSink;
-use crate::index::FileId;
 use crate::intern::StringInterner;
-use crate::parser::classify::statements::{
-    DefinedIoGenericSpec, DefinedOperator, GenericSpec, ImportStmt, ModuleImportList, ModuleNature,
-    Only, ParentIdentifier, Rename, Spanned,
-};
-use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
-use crate::parser::lex::TokenizerOptions;
-use crate::span::Span;
+use crate::parser::classify::statements::Spanned;
+use crate::parser::classify::{ClassifierArena, StmtKind};
+use std::cell::RefCell;
 
 use super::{classifier, get_stmts, test_span};
 

@@ -27,9 +27,15 @@ impl Span {
     }
 
     pub fn concat(self, next: Self) -> Span {
-        assert_eq!(self.file_id, next.file_id, "Cannot concat spans across separate files");
+        assert_eq!(
+            self.file_id, next.file_id,
+            "Cannot concat spans across separate files"
+        );
 
-        assert!(next.start >= self.end, "Concatenated spans must not be overlapping or out of order");
+        assert!(
+            next.start >= self.end,
+            "Concatenated spans must not be overlapping or out of order"
+        );
 
         Span {
             file_id: self.file_id,

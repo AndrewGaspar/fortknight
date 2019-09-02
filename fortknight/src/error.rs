@@ -94,10 +94,13 @@ impl DiagnosticSink {
 
 #[derive(Debug)]
 pub enum AnalysisErrorKind {
-    // Lexer + Parser Errors: E0000-E0999
+    /// Lexer + Parser Errors: E0000-E0999
     Parser(ParserErrorCode),
 
-    // System Errors: E9000+
+    /// Semantic Errors: E1000-E1999
+    Semantic(SemanticErrorCode),
+
+    /// System Errors: E9000+
     Io(std::io::Error),
 }
 
@@ -105,6 +108,7 @@ impl AnalysisErrorKind {
     pub fn code(&self) -> u16 {
         match self {
             AnalysisErrorKind::Parser(err) => 0000 + err.code(),
+            AnalysisErrorKind::Semantic(err) => 1000 + err.code(),
             AnalysisErrorKind::Io(_) => 9000,
         }
     }
@@ -144,7 +148,24 @@ impl ParserErrorCode {
             ExpectedEOS => 10,
             ExpectedToken => 11,
         };
-        assert!(code < 1000);
+        debug_assert!(code < 1000);
+        code
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SemanticErrorCode {
+    ImplicitNoneDuplicateSpec,
+}
+
+impl SemanticErrorCode {
+    pub fn code(self) -> u16 {
+        use SemanticErrorCode::*;
+
+        let code = match self {
+            ImplicitNoneDuplicateSpec => 0,
+        };
+        debug_assert!(code < 1000);
         code
     }
 }

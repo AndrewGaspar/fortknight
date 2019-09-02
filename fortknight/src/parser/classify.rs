@@ -1,24 +1,28 @@
 use std::cell::RefCell;
 use std::fmt::Write;
-use std::iter::Peekable;
 
+use peek_nth::{IteratorExt, PeekableNth};
 use typed_arena::Arena;
 
-use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode};
+use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode, SemanticErrorCode};
 use crate::index::FileId;
 use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
 mod block;
+mod implicit;
 mod import_stmt;
 mod statements;
+mod types;
 mod use_stmt;
 
 #[cfg(test)]
 mod tests;
 
-use statements::{Only, ParentIdentifier, Rename, Spanned};
+use statements::{
+    Expr, ImplicitSpec, LetterSpec, Only, ParentIdentifier, Rename, Spanned, TypeParamSpec,
+};
 pub use statements::{Stmt, StmtKind};
 
 pub enum Lookahead<'a> {
@@ -33,13 +37,16 @@ pub enum TakeUntil {
 }
 
 #[derive(Default)]
-pub struct ClassifierArena {
+pub struct ClassifierArena<'arena> {
     onlys: Arena<Spanned<Only>>,
     renames: Arena<Spanned<Rename>>,
     names: Arena<Spanned<InternedName>>,
+    implicit_specs: Arena<Spanned<ImplicitSpec<'arena>>>,
+    type_param_specs: Arena<TypeParamSpec<'arena>>,
+    letter_specs: Arena<LetterSpec>,
 }
 
-impl ClassifierArena {
+impl<'arena> ClassifierArena<'arena> {
     pub fn new() -> Self {
         ClassifierArena::default()
     }
@@ -49,9 +56,9 @@ pub struct Classifier<'input, 'arena> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
-    tokenizer: Peekable<Tokenizer<'input>>,
+    tokenizer: PeekableNth<Tokenizer<'input>>,
     interner: &'input mut crate::intern::StringInterner,
-    arena: &'arena ClassifierArena,
+    arena: &'arena ClassifierArena<'arena>,
 }
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
@@ -61,13 +68,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         text: &'input str,
         diagnostics: &'input RefCell<DiagnosticSink>,
         interner: &'input mut crate::intern::StringInterner,
-        arena: &'arena ClassifierArena,
+        arena: &'arena ClassifierArena<'arena>,
     ) -> Self {
         Classifier {
             file_id,
             text,
             diagnostics,
-            tokenizer: Tokenizer::new(options, file_id, text, diagnostics).peekable(),
+            tokenizer: Tokenizer::new(options, file_id, text, diagnostics).peekable_nth(),
             interner,
             arena,
         }
@@ -79,6 +86,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     fn peek(&mut self) -> Option<&Token> {
         self.tokenizer.peek()
+    }
+
+    fn peek_nth(&mut self, n: usize) -> Option<&Token> {
+        self.tokenizer.peek_nth(n)
+    }
+
+    fn peek_kind(&mut self) -> Option<TokenKind> {
+        self.peek().map(|t| t.kind)
+    }
+
+    fn peek_nth_kind(&mut self, n: usize) -> Option<TokenKind> {
+        self.peek_nth(n).map(|t| t.kind)
     }
 
     fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
@@ -94,6 +113,19 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         self.diagnostics.borrow_mut().emit_error_from_contents(
             &self.text,
             AnalysisErrorKind::Parser(err),
+            Span {
+                file_id: self.file_id,
+                start,
+                end,
+            },
+            msg,
+        )
+    }
+
+    fn emit_semantic_error(&mut self, err: SemanticErrorCode, start: u32, end: u32, msg: &str) {
+        self.diagnostics.borrow_mut().emit_error_from_contents(
+            &self.text,
+            AnalysisErrorKind::Semantic(err),
             Span {
                 file_id: self.file_id,
                 start,
@@ -206,10 +238,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn is_eos(t: &Token) -> bool {
-        match t.kind {
-            TokenKind::NewLine | TokenKind::SemiColon | TokenKind::Commentary => true,
-            _ => false,
-        }
+        t.kind.is_eos()
     }
 
     fn take_until<F>(&mut self, mut terminate: F) -> Result<u32, u32>
@@ -235,8 +264,42 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
+    /// This function helps lookahead past a parenthetical - it returns the index ahead where the
+    /// current parenthetical ends. If we reach the end of a statement, None is returned.
+    fn idx_past_parentheticals_in_statement(&mut self, start_idx: usize) -> Option<usize> {
+        let mut depth = 0;
+        let mut idx = start_idx;
+
+        if Some(TokenKind::LeftParen) != self.peek_nth_kind(idx) {
+            return None;
+        }
+
+        loop {
+            match self.peek_nth_kind(idx) {
+                Some(TokenKind::LeftParen) => {
+                    depth += 1;
+                }
+                Some(TokenKind::RightParen) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(idx + 1);
+                    }
+                }
+                Some(t) if t.is_eos() => {
+                    return None;
+                }
+                None => {
+                    return None;
+                }
+                _ => {}
+            }
+
+            idx += 1;
+        }
+    }
+
     fn take_until_eos(&mut self) -> Option<Span> {
-        let mut last_seen = None;
+        let mut last_seen: Option<Span> = self.peek().map(|t| t.span);
         for t in &mut self.tokenizer {
             if Self::is_eos(&t) {
                 return last_seen;
@@ -270,6 +333,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 )
             }
         };
+    }
+
+    /// R1022: expr
+    ///
+    /// Parses an expression from the beginning of the expression. When an error is encountered, an
+    /// error is emitted and None is returned without consuming the erroneous token.
+    fn expr(&mut self) -> Option<Spanned<Expr<'arena>>> {
+        unimplemented!()
     }
 
     fn program(&mut self, start_span: &Span) -> Stmt<'arena> {
@@ -573,15 +644,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         let token = self.tokenizer.next()?;
 
         let stmt = match token.kind {
+            TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
+            TokenKind::Keyword(KeywordTokenKind::Implicit) => self.implicit_stmt(token.span),
+            TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
             TokenKind::Keyword(KeywordTokenKind::Program) => self.program(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndProgram) => self.end_program(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Module) => self.module(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndModule) => self.end_module(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Submodule) => self.submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
             TokenKind::Keyword(KeywordTokenKind::Contains) => self.contains(token.span),
             TokenKind::Keyword(KeywordTokenKind::Block) => self.stmt_from_block(token.span),
             TokenKind::Keyword(KeywordTokenKind::BlockData) => {
@@ -635,6 +707,38 @@ fn eos_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
         TokenKind::SemiColon,
         TokenKind::NewLine,
         TokenKind::Commentary,
+    ]);
+    vec.extend_from_slice(tokens);
+
+    vec
+}
+
+const INTRINSIC_TYPE_SPEC_TOKENS: &'static [TokenKind] = &[
+    TokenKind::Keyword(KeywordTokenKind::Integer),
+    TokenKind::Keyword(KeywordTokenKind::Real),
+    TokenKind::Keyword(KeywordTokenKind::Double),
+    TokenKind::Keyword(KeywordTokenKind::DoublePrecision),
+    TokenKind::Keyword(KeywordTokenKind::Complex),
+    TokenKind::Keyword(KeywordTokenKind::Character),
+    TokenKind::Keyword(KeywordTokenKind::Logical),
+];
+
+fn intrinsic_type_spec_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
+    let mut vec = Vec::with_capacity(INTRINSIC_TYPE_SPEC_TOKENS.len() + tokens.len());
+
+    vec.extend_from_slice(INTRINSIC_TYPE_SPEC_TOKENS);
+    vec.extend_from_slice(tokens);
+
+    vec
+}
+
+fn declaration_type_spec_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
+    let mut vec = Vec::with_capacity(2 + INTRINSIC_TYPE_SPEC_TOKENS.len() + tokens.len());
+
+    vec.extend_from_slice(INTRINSIC_TYPE_SPEC_TOKENS);
+    vec.extend_from_slice(&[
+        TokenKind::Keyword(KeywordTokenKind::Type),
+        TokenKind::Keyword(KeywordTokenKind::Class),
     ]);
     vec.extend_from_slice(tokens);
 

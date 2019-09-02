@@ -14,10 +14,7 @@ pub struct Token {
 
 impl Token {
     pub fn is_name(&self) -> bool {
-        match self.kind {
-            TokenKind::Name | TokenKind::Keyword(_) => true,
-            _ => false,
-        }
+        self.kind.is_name()
     }
 
     /// True if the token is a routine attribute
@@ -65,7 +62,7 @@ impl Token {
 
     fn get_internable_span(&self, contents: &str) -> Option<Span> {
         let span = match self.kind {
-            TokenKind::Name | TokenKind::Keyword(_) => self.span,
+            TokenKind::Name | TokenKind::Keyword(_) | TokenKind::Letter(_) => self.span,
             TokenKind::DefinedOperator => {
                 let text = &contents[self.span.start as usize..self.span.end as usize];
                 debug_assert_eq!(".", &text[..1], "Internal error: Invariant that DefinedOperator starts with a . was not upheld.");
@@ -136,6 +133,7 @@ pub enum TokenKind {
     // user strings
     Name,
     Keyword(KeywordTokenKind),
+    Letter(Letter),
 
     NewLine,
     Commentary,
@@ -201,6 +199,7 @@ impl TokenKind {
         match self {
             Name => "name".into(),
             Keyword(keyword) => format!("`{:?}`", keyword).to_uppercase(),
+            Letter(letter) => format!("`{:?}`", letter).to_uppercase(),
 
             NewLine => "new-line".into(),
             Commentary => "commentary".into(),
@@ -256,6 +255,75 @@ impl TokenKind {
             Unknown => "unknown".into(),
         }
     }
+
+    pub fn is_name(&self) -> bool {
+        match self {
+            TokenKind::Name | TokenKind::Keyword(_) | TokenKind::Letter(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_eos(&self) -> bool {
+        match self {
+            TokenKind::NewLine | TokenKind::SemiColon | TokenKind::Commentary => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_intrinsic_type_spec_start(&self) -> bool {
+        match self {
+            TokenKind::Keyword(KeywordTokenKind::Integer)
+            | TokenKind::Keyword(KeywordTokenKind::Real)
+            | TokenKind::Keyword(KeywordTokenKind::Double)
+            | TokenKind::Keyword(KeywordTokenKind::DoublePrecision)
+            | TokenKind::Keyword(KeywordTokenKind::Complex)
+            | TokenKind::Keyword(KeywordTokenKind::Character)
+            | TokenKind::Keyword(KeywordTokenKind::Logical) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_declaration_type_spec_start(&self) -> bool {
+        if self.is_intrinsic_type_spec_start() {
+            return true;
+        }
+
+        match self {
+            TokenKind::Keyword(KeywordTokenKind::Type)
+            | TokenKind::Keyword(KeywordTokenKind::Class) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+pub enum Letter {
+    A = 0,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
@@ -289,7 +357,7 @@ pub enum KeywordTokenKind {
     // Type,
     Abstract,
     Bind,
-    C,
+    // C, // Parsed as a letter
     Extends,
     EndType,
     // 7.5.2.3: Sequence type

@@ -14,6 +14,7 @@ use crate::parser::lex::TokenizerOptions;
 use crate::span::Span;
 
 mod block_tests;
+mod implicit_tests;
 
 #[test]
 fn program() {
@@ -871,7 +872,7 @@ pub(crate) fn classifier<'input, 'arena>(
     text: &'input str,
     sink: &'input RefCell<DiagnosticSink>,
     interner: &'input mut StringInterner,
-    arena: &'arena ClassifierArena,
+    arena: &'arena ClassifierArena<'arena>,
 ) -> Classifier<'input, 'arena> {
     Classifier::new(
         &TokenizerOptions::default(),

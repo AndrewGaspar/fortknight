@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::iter::Iterator;
 use std::str::CharIndices;
 
+use num_traits::FromPrimitive;
+
 use self::TakeUntil::*;
 
 use crate::error::{
@@ -18,7 +20,7 @@ mod tests;
 mod token;
 
 use token::*;
-pub use token::{KeywordTokenKind, Token, TokenKind};
+pub use token::{KeywordTokenKind, Letter, Token, TokenKind};
 
 #[derive(Clone, Copy, Default)]
 pub struct TokenizerOptions {
@@ -165,9 +167,11 @@ impl<'input> Tokenizer<'input> {
             })
             .expect("Internal error: identifier tokens always terminate");
 
-        let word = CaseInsensitiveContinuationStr::new(&self.text_span(idx0, idx1));
+        let word = CaseInsensitiveContinuationStr::new(&self.text_span(idx0, idx1)).to_string();
 
-        let kind = if let Some(kind) = KEYWORDS_TRIE.get(&word.to_string()) {
+        let kind = if word.len() == 1 {
+            TokenKind::Letter(Letter::from_u8(word.as_bytes()[0] - b'a').unwrap())
+        } else if let Some(kind) = KEYWORDS_TRIE.get(&word) {
             TokenKind::Keyword(*kind)
         } else {
             TokenKind::Name

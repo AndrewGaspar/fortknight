@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::default::Default;
 
 use super::{
-    token::{KeywordTokenKind, TokenKind},
+    token::{KeywordTokenKind, Letter, TokenKind},
     Tokenizer, TokenizerOptions,
 };
 use crate::error::DiagnosticSink;
@@ -33,6 +33,7 @@ pub fn get_tokens_unwrap(text: &str) -> Vec<TokenKind> {
 
 #[test]
 fn basic() {
+    use super::Letter::*;
     use KeywordTokenKind::*;
     use TokenKind::*;
 
@@ -43,7 +44,7 @@ fn basic() {
             NewLine,
             Keyword(If),
             LeftParen,
-            TokenKind::Name,
+            TokenKind::Letter(X),
             EqualsOp,
             DigitString,
             RightParen,
@@ -77,6 +78,7 @@ end program foo",
 #[test]
 fn with_continuations() {
     use super::KeywordTokenKind::*;
+    use super::Letter::*;
     use super::TokenKind::{self, *};
 
     assert_eq!(
@@ -86,7 +88,7 @@ fn with_continuations() {
             NewLine,
             Keyword(If),
             LeftParen,
-            TokenKind::Name,
+            TokenKind::Letter(X),
             EqualsOp,
             DigitString,
             RightParen,
@@ -129,10 +131,10 @@ e&
 fn bad_token() {
     assert_eq!(
         vec![
-            TokenKind::Name,
+            TokenKind::Letter(Letter::X),
             TokenKind::Unknown,
             // Result::Err(ParserErrorCode::UnrecognizedToken),
-            TokenKind::Name,
+            TokenKind::Letter(Letter::Y),
         ],
         get_tokens_unwrap("x @ y"),
         // get_tokens("x @ y"),
@@ -142,6 +144,7 @@ fn bad_token() {
 #[test]
 fn commentary() {
     use super::KeywordTokenKind::*;
+    use super::Letter::*;
     use TokenKind::*;
 
     assert_eq!(
@@ -152,7 +155,7 @@ fn commentary() {
             Commentary,
             Keyword(If),
             LeftParen,
-            TokenKind::Name,
+            TokenKind::Letter(X),
             EqualsOp,
             DigitString,
             RightParen,
