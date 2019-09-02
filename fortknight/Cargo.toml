@@ -5,7 +5,7 @@ authors = ["Andrew Gaspar <andrew.gaspar@outlook.com>"]
 edition = "2018"
 
 [dependencies]
-lazy_static = "1.3.0"
+lazy_static = "1.4.0"
 num-derive = "0.2.5"
 num-traits = "0.2.8"
 radix_trie = "0.1.4"
