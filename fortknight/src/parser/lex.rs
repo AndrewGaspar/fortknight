@@ -211,7 +211,7 @@ impl<'input> Tokenizer<'input> {
         // TODO: Add optional, non-standard support for escape sequences. See gfortran
         // -fbackslash option
         // See: https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
-        let maybe_idx1 = self.take_until_terminate(true, |lookahead: Lookahead| {
+        let maybe_idx1 = self.take_until(|lookahead: Lookahead| {
             if saw_closing_quote {
                 match lookahead {
                     Lookahead::Character(_, c) if c == quote => {
@@ -258,17 +258,8 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn finish_exponent(&mut self, idx0: u32) -> Token {
-        if let Lookahead::Character(idx1, '+') | Lookahead::Character(idx1, '-') = self.peek() {
+        if let Lookahead::Character(_, '+') | Lookahead::Character(_, '-') = self.peek() {
             self.bump();
-            if !self.skip_continuation() {
-                self.emit_error(
-                    MissingExponent,
-                    idx0,
-                    idx1,
-                    &format!("Real literal constant has incomplete exponent part"),
-                );
-                return self.token(TokenKind::Unknown, idx0, idx1);
-            }
         }
 
         match self.peek() {
@@ -290,19 +281,9 @@ impl<'input> Tokenizer<'input> {
 
     fn finish_real_literal_constant(&mut self, idx0: u32) -> Token {
         match self.peek() {
-            Lookahead::Character(idx1, c) if is_exponent_letter(c) => {
+            Lookahead::Character(_, c) if is_exponent_letter(c) => {
                 self.bump();
-                if !self.skip_continuation() {
-                    self.emit_error(
-                        MissingExponent,
-                        idx0,
-                        idx1,
-                        "Real literal constant has incomplete exponent part",
-                    );
-                    self.token(TokenKind::Unknown, idx0, idx1)
-                } else {
-                    self.finish_exponent(idx0)
-                }
+                self.finish_exponent(idx0)
             }
             lookahead => self.token(
                 TokenKind::RealLiteralConstant,
@@ -328,38 +309,24 @@ impl<'input> Tokenizer<'input> {
         let idx1 = self.take_digit_string();
 
         match self.peek() {
-            Lookahead::Character(idx1, '.') => {
+            Lookahead::Character(_, '.') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    self.token(TokenKind::RealLiteralConstant, idx0, idx1)
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
-                        Lookahead::Character(_, c) if is_exponent_letter(c) => {
-                            self.finish_real_literal_constant(idx0)
-                        }
-                        Lookahead::Character(idx1, _) => {
-                            self.token(TokenKind::RealLiteralConstant, idx0, idx1)
-                        }
-                        Lookahead::EOF => {
-                            self.token(TokenKind::RealLiteralConstant, idx0, self.text_len())
-                        }
+                match self.peek() {
+                    Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
+                    Lookahead::Character(_, c) if is_exponent_letter(c) => {
+                        self.finish_real_literal_constant(idx0)
+                    }
+                    Lookahead::Character(idx1, _) => {
+                        self.token(TokenKind::RealLiteralConstant, idx0, idx1)
+                    }
+                    Lookahead::EOF => {
+                        self.token(TokenKind::RealLiteralConstant, idx0, self.text_len())
                     }
                 }
             }
-            Lookahead::Character(idx1, c) if is_exponent_letter(c) => {
+            Lookahead::Character(_, c) if is_exponent_letter(c) => {
                 self.bump();
-                if !self.skip_continuation() {
-                    self.emit_error(
-                        MissingExponent,
-                        idx0,
-                        idx1,
-                        "Real literal constant has incomplete exponent part",
-                    );
-                    self.token(TokenKind::Unknown, idx0, idx1)
-                } else {
-                    self.finish_exponent(idx0)
-                }
+                self.finish_exponent(idx0)
             }
             _ => self.token(TokenKind::DigitString, idx0, idx1),
         }
@@ -390,7 +357,7 @@ impl<'input> Tokenizer<'input> {
     /// Parses a C style block comment
     fn c_block_commentary(&mut self, idx0: u32) -> Token {
         let mut maybe_end = false;
-        let idx1 = self.take_until_ignore_continuation(|lookahead: Lookahead| match lookahead {
+        let idx1 = self.take_until(|lookahead: Lookahead| match lookahead {
             Lookahead::Character(_, '*') => {
                 maybe_end = true;
                 Continue
@@ -429,93 +396,8 @@ impl<'input> Tokenizer<'input> {
                     self.bump();
                     self.token(TokenKind::NewLine, idx0, idx0 + 1)
                 }
-                Lookahead::Character(idx0, '\r') => {
-                    match self.bump() {
-                        Lookahead::Character(_, '\n') => {
-                            self.bump();
-                            self.token(TokenKind::NewLine, idx0, idx0 + 2)
-                        }
-                        // CR is not a supported line ending
-                        _ => {
-                            self.emit_error(
-                                InvalidCarriageReturn,
-                                idx0,
-                                idx0 + 1,
-                                "CR is not a valid line ending. Only CRLF and LF are supported.",
-                            );
-                            // But still act like it is so we can at least progress.
-                            self.token(TokenKind::NewLine, idx0, idx0 + 1)
-                        }
-                    }
-                }
                 _ => panic!("self.peek() must match a new line start"),
             };
-        }
-    }
-
-    fn continuation(&mut self) -> bool {
-        let mut first_line = true;
-
-        loop {
-            return match self.peek() {
-                Lookahead::Character(idx0, '!') => {
-                    self.bump();
-                    self.commentary(idx0);
-                    continue;
-                }
-                Lookahead::Character(_, c) if is_new_line_start(c) => {
-                    first_line = false;
-                    self.consume_new_line();
-                    continue;
-                }
-                Lookahead::Character(_, s) if s.is_whitespace() => {
-                    self.bump();
-                    continue;
-                }
-                Lookahead::Character(idx0, _) if first_line => {
-                    self.bump();
-                    let idx1 = loop {
-                        match self.bump() {
-                            Lookahead::Character(idx1, '!') => break idx1,
-                            Lookahead::Character(idx1, c) if is_new_line_start(c) => break idx1,
-                            Lookahead::EOF => break self.text_len(),
-                            _ => continue,
-                        }
-                    };
-
-                    self.emit_error(
-                        UnexpectedPostContinuationCharacter, idx0, idx1,
-                        "Nothing may follow a line continuation besides commentary, whitespace, or \
-                        a newline");
-                    continue;
-                }
-                // If an & is encountered, we're done processing the
-                // continuation. The caller should continue whatever
-                // tokenization process it was previously performing.
-                Lookahead::Character(_, '&') => {
-                    self.bump();
-                    true
-                }
-                // If a new token is encountered, then the continuation has
-                // ended. The new character is a new token.
-                Lookahead::Character(_, _) => false,
-                // Treat an unterminated continuation as one that does not continue a token
-                Lookahead::EOF => false,
-            };
-        }
-    }
-
-    /// Can be called at any time during tokenization. Should be called at every
-    /// character when consuming a multi-character token.
-    ///
-    /// Returns None if continuation is skipped without issue. Return Some(err)
-    /// if there was an issue in the continuation.
-    fn skip_continuation(&mut self) -> bool {
-        if let Lookahead::Character(_, '&') = self.peek() {
-            self.bump();
-            self.continuation()
-        } else {
-            true
         }
     }
 
@@ -529,20 +411,16 @@ impl<'input> Tokenizer<'input> {
             (idx0, '=') => {
                 self.bump();
 
-                if !self.skip_continuation() {
-                    self.token(TokenKind::Equals, idx0, idx0 + 1)
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, '>') => {
-                            self.bump();
-                            self.token(TokenKind::Arrow, idx0, idx1 + 1)
-                        }
-                        Lookahead::Character(idx1, '=') => {
-                            self.bump();
-                            self.token(TokenKind::EqualsEquals, idx0, idx1 + 1)
-                        }
-                        _ => self.token(TokenKind::Equals, idx0, idx0 + 1),
+                match self.peek() {
+                    Lookahead::Character(idx1, '>') => {
+                        self.bump();
+                        self.token(TokenKind::Arrow, idx0, idx1 + 1)
                     }
+                    Lookahead::Character(idx1, '=') => {
+                        self.bump();
+                        self.token(TokenKind::EqualsEquals, idx0, idx1 + 1)
+                    }
+                    _ => self.token(TokenKind::Equals, idx0, idx0 + 1),
                 }
             }
             (idx0, '+') => {
@@ -555,38 +433,30 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '*') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    self.token(TokenKind::Star, idx0, idx0 + 1)
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, '*') => {
-                            self.bump();
-                            self.token(TokenKind::StarStar, idx0, idx1 + 1)
-                        }
-                        _ => self.token(TokenKind::Star, idx0, idx0 + 1),
+                match self.peek() {
+                    Lookahead::Character(idx1, '*') => {
+                        self.bump();
+                        self.token(TokenKind::StarStar, idx0, idx1 + 1)
                     }
+                    _ => self.token(TokenKind::Star, idx0, idx0 + 1),
                 }
             }
             (idx0, '/') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    self.token(TokenKind::Slash, idx0, idx0 + 1)
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, '/') => {
-                            self.bump();
-                            self.token(TokenKind::SlashSlash, idx0, idx1 + 1)
-                        }
-                        Lookahead::Character(idx1, '=') => {
-                            self.bump();
-                            self.token(TokenKind::SlashEquals, idx0, idx1 + 1)
-                        }
-                        Lookahead::Character(_, '*') if self.tokenize_preprocessor => {
-                            self.bump();
-                            self.c_block_commentary(idx0)
-                        }
-                        _ => self.token(TokenKind::Slash, idx0, idx0 + 1),
+                match self.peek() {
+                    Lookahead::Character(idx1, '/') => {
+                        self.bump();
+                        self.token(TokenKind::SlashSlash, idx0, idx1 + 1)
                     }
+                    Lookahead::Character(idx1, '=') => {
+                        self.bump();
+                        self.token(TokenKind::SlashEquals, idx0, idx1 + 1)
+                    }
+                    Lookahead::Character(_, '*') if self.tokenize_preprocessor => {
+                        self.bump();
+                        self.c_block_commentary(idx0)
+                    }
+                    _ => self.token(TokenKind::Slash, idx0, idx0 + 1),
                 }
             }
             (idx0, '%') => {
@@ -611,45 +481,33 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '<') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    (self.token(TokenKind::LeftAngle, idx0, idx0 + 1))
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, '=') => {
-                            self.bump();
-                            (self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
-                        }
-                        _ => (self.token(TokenKind::LeftAngle, idx0, idx0 + 1)),
+                match self.peek() {
+                    Lookahead::Character(idx1, '=') => {
+                        self.bump();
+                        (self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
                     }
+                    _ => (self.token(TokenKind::LeftAngle, idx0, idx0 + 1)),
                 }
             }
             (idx0, '>') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    (self.token(TokenKind::RightAngle, idx0, idx0 + 1))
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, '=') => {
-                            self.bump();
-                            (self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
-                        }
-                        _ => (self.token(TokenKind::RightAngle, idx0, idx0 + 1)),
+                match self.peek() {
+                    Lookahead::Character(idx1, '=') => {
+                        self.bump();
+                        (self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
                     }
+                    _ => (self.token(TokenKind::RightAngle, idx0, idx0 + 1)),
                 }
             }
             (idx0, '.') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    (self.token(TokenKind::Dot, idx0, idx0 + 1))
-                } else {
-                    match self.peek() {
-                        // if followed by a letter, then this must be an operator
-                        Lookahead::Character(_, c) if is_letter(c) => self.operator(idx0),
-                        // If followed by a digit, then this must be an real literal constant
-                        Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
-                        // else just return the dot token
-                        _ => (self.token(TokenKind::Dot, idx0, idx0 + 1)),
-                    }
+                match self.peek() {
+                    // if followed by a letter, then this must be an operator
+                    Lookahead::Character(_, c) if is_letter(c) => self.operator(idx0),
+                    // If followed by a digit, then this must be an real literal constant
+                    Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
+                    // else just return the dot token
+                    _ => (self.token(TokenKind::Dot, idx0, idx0 + 1)),
                 }
             }
             (idx0, ',') => {
@@ -658,16 +516,12 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, ':') => {
                 self.bump();
-                if !self.skip_continuation() {
-                    (self.token(TokenKind::Colon, idx0, idx0 + 1))
-                } else {
-                    match self.peek() {
-                        Lookahead::Character(idx1, ':') => {
-                            self.bump();
-                            (self.token(TokenKind::ColonColon, idx0, idx1 + 1))
-                        }
-                        _ => (self.token(TokenKind::Colon, idx0, idx0 + 1)),
+                match self.peek() {
+                    Lookahead::Character(idx1, ':') => {
+                        self.bump();
+                        (self.token(TokenKind::ColonColon, idx0, idx1 + 1))
                     }
+                    _ => (self.token(TokenKind::Colon, idx0, idx0 + 1)),
                 }
             }
             (idx0, ';') => {
@@ -704,10 +558,6 @@ impl<'input> Tokenizer<'input> {
     fn internal_next(&mut self) -> Option<Token> {
         loop {
             return match self.peek() {
-                Lookahead::Character(_, '&') => {
-                    self.skip_continuation();
-                    continue;
-                }
                 Lookahead::Character(_, c) if is_new_line_start(c) => Some(self.consume_new_line()),
                 Lookahead::Character(_, c) if c.is_whitespace() => {
                     self.bump();
@@ -719,49 +569,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn take_until_terminate<F>(
-        &mut self,
-        require_continue_context: bool,
-        mut terminate: F,
-    ) -> Result<u32, u32>
-    where
-        F: FnMut(Lookahead) -> TakeUntil,
-    {
-        loop {
-            return match self.peek() {
-                Lookahead::Character(idx1, '&') => {
-                    self.bump();
-                    let continue_context = self.continuation();
-                    if require_continue_context && !continue_context {
-                        let lookahead = self.peek();
-                        self.emit_error(
-                            DiscontinuedCharacterContext,
-                            idx1,
-                            self.lookahead_idx(lookahead),
-                            "Missing continuation ('&') of string literal",
-                        );
-                    }
-
-                    continue;
-                }
-                Lookahead::EOF => match terminate(Lookahead::EOF) {
-                    Continue => panic!("Internal error: Tried to tokenize past EOF!"),
-                    Stop => Ok(self.text_len()),
-                    Abort => Err(self.text_len()),
-                },
-                Lookahead::Character(idx1, c) => match terminate(Lookahead::Character(idx1, c)) {
-                    Continue => {
-                        self.bump();
-                        continue;
-                    }
-                    Stop => Ok(idx1),
-                    Abort => Err(idx1),
-                },
-            };
-        }
-    }
-
-    fn take_until_ignore_continuation<F>(&mut self, mut terminate: F) -> Result<u32, u32>
+    fn take_until<F>(&mut self, mut terminate: F) -> Result<u32, u32>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
@@ -782,13 +590,6 @@ impl<'input> Tokenizer<'input> {
                 },
             };
         }
-    }
-
-    fn take_until<F>(&mut self, terminate: F) -> Result<u32, u32>
-    where
-        F: FnMut(Lookahead) -> TakeUntil,
-    {
-        self.take_until_terminate(false, terminate)
     }
 
     fn peek_nth(&mut self, n: usize) -> Lookahead {
@@ -880,7 +681,8 @@ fn is_identifier_continue(c: char) -> bool {
 }
 
 fn is_new_line_start(c: char) -> bool {
-    c == '\r' || c == '\n'
+    // CRs are preprocessed out, so we don't have to check for them in the Tokenizer
+    c == '\n'
 }
 
 fn is_digit(c: char) -> bool {
