@@ -39,3 +39,16 @@ fn in_string_literal() {
     assert_eq!("\"howdyall\"", ll_lex("\"howdy&\nall\""));
     assert_eq!("\"howdy all\"", ll_lex("\"howdy&\n all\""));
 }
+
+#[test]
+fn rock_star() {
+    assert_eq!(
+        "'hey now  you''re a rock star,  get your game on,  go play!'",
+        ll_lex(
+            "'hey now &
+        & you''re a rock star, &
+        & get your game on, &
+        & go play!'"
+        )
+    );
+}

@@ -12,6 +12,14 @@ use crate::span::Span;
 
 use super::TokenizerOptions;
 
+#[derive(PartialEq, Eq)]
+enum InCComment {
+    No,
+    InOpening,
+    Yes,
+    InClosing,
+}
+
 /// Merely massaging the underlying character stream to make it easier for the higher level lexer to
 /// to lex tokens. It does this by:
 /// - resolving continuations
@@ -24,6 +32,7 @@ pub struct LowLevelLexer<'input> {
     tokenize_preprocessor: bool,
     fresh_new_line: bool,
     opening_quote: Option<char>,
+    in_c_comment: InCComment,
 }
 
 impl<'input> LowLevelLexer<'input> {
@@ -46,6 +55,7 @@ impl<'input> LowLevelLexer<'input> {
             tokenize_preprocessor: options.tokenize_preprocessor,
             fresh_new_line: true,
             opening_quote: None,
+            in_c_comment: InCComment::No,
         }
     }
 
@@ -174,7 +184,8 @@ impl<'input> LowLevelLexer<'input> {
         // Resolve first line
         loop {
             match self.peek() {
-                // Commentary is ignored inside a string literal
+                // Commentary is ignored inside a string literal - exclamation points are
+                // significant
                 Some((_, '!')) if self.opening_quote.is_none() => {
                     self.skip_commentary();
                     self.consume_new_line();
@@ -224,8 +235,7 @@ impl<'input> LowLevelLexer<'input> {
                     // this was a commentary line, so forget the whitespace we saw
                     first_seen_whitepace = None;
                 }
-                // Whitespace, or lack of whitespace, is always significant in a string-literal
-                Some((_, c)) if self.opening_quote.is_none() && c.is_whitespace() => {
+                Some((_, c)) if c.is_whitespace() => {
                     // Whitespace only later becomes significant if it turns out we're not in a
                     // token continuation
                     if first_seen_whitepace.is_none() {
@@ -287,7 +297,11 @@ impl<'input> LowLevelLexer<'input> {
                             idx,
                             "Missing continuation ('&') of string literal",
                         );
-                        return self.bump_nth(advance_by);
+
+                        return match first_seen_whitepace {
+                            Some(x) => self.bump_nth(x),
+                            None => self.bump_nth(advance_by),
+                        };
                     }
 
                     // If we encounter a significant character, then we know we're merely continuing
@@ -303,14 +317,41 @@ impl<'input> LowLevelLexer<'input> {
             };
         }
     }
+
+    /// Only called when we're tokenizing the preprocessor, and we've detected that we're in a c
+    /// block comment. Consider this a separate "mode".
+    fn in_c_comment_next(&mut self) -> Option<(u32, char)> {
+        match self.peek() {
+            Some((_, '*')) if self.in_c_comment == InCComment::InOpening => {
+                self.in_c_comment = InCComment::Yes;
+                self.bump()
+            }
+            Some((_, '*')) if self.in_c_comment == InCComment::Yes => {
+                if let Some((_, '/')) = self.peek_nth(1) {
+                    self.in_c_comment = InCComment::InClosing;
+                }
+                self.bump()
+            }
+            Some((_, '/')) if self.in_c_comment == InCComment::InClosing => {
+                self.in_c_comment = InCComment::No;
+                self.bump()
+            }
+            _ => self.bump(),
+        }
+    }
 }
 
 impl<'input> Iterator for LowLevelLexer<'input> {
     type Item = (u32, char);
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.in_c_comment != InCComment::No {
+            return self.in_c_comment_next();
+        }
+
         loop {
             return match self.peek() {
+                // '&' is significant in a C Block Comment
                 Some((idx0, '&')) => {
                     if self.fresh_new_line {
                         self.emit_error(
@@ -337,6 +378,14 @@ impl<'input> Iterator for LowLevelLexer<'input> {
                 }
                 Some((_, c)) if Some(c) == self.opening_quote => {
                     self.opening_quote = None;
+                    self.bump()
+                }
+                Some((_, '/'))
+                    if self.tokenize_preprocessor && self.in_c_comment == InCComment::No =>
+                {
+                    if let Some((_, '*')) = self.peek_nth(1) {
+                        self.in_c_comment = InCComment::InOpening;
+                    };
                     self.bump()
                 }
                 _ => {
