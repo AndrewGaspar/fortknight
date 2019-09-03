@@ -9,6 +9,7 @@ use crate::error::DiagnosticSink;
 use crate::index::FileId;
 
 mod intrinsics;
+mod low_level;
 mod preprocessor;
 mod strings;
 

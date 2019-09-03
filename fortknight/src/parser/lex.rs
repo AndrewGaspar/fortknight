@@ -18,6 +18,7 @@ use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 #[cfg(test)]
 mod tests;
 
+mod low_level;
 mod token;
 
 use token::*;
@@ -499,12 +500,6 @@ impl<'input> Tokenizer<'input> {
                 Lookahead::Character(_, _) => false,
                 // Treat an unterminated continuation as one that does not continue a token
                 Lookahead::EOF => {
-                    self.emit_error(
-                        UnterminatedContinuationLine,
-                        idx0,
-                        self.text_len(),
-                        "Line continuation terminated by end of file",
-                    );
                     false
                 }
             };
