@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::iter::Iterator;
-use std::str::CharIndices;
 
 use num_traits::FromPrimitive;
 use peek_nth::{IteratorExt, PeekableNth};
@@ -24,6 +23,8 @@ mod token;
 use token::*;
 pub use token::{KeywordTokenKind, Letter, Token, TokenKind};
 
+use low_level::LowLevelLexer;
+
 #[derive(Clone, Copy, Default)]
 pub struct TokenizerOptions {
     pub tokenize_preprocessor: bool,
@@ -33,7 +34,7 @@ pub struct Tokenizer<'input> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
-    chars: PeekableNth<CharIndices<'input>>,
+    chars: PeekableNth<LowLevelLexer<'input>>,
     tokenize_preprocessor: bool,
 }
 
@@ -66,7 +67,7 @@ impl<'input> Tokenizer<'input> {
             file_id,
             text,
             diagnostics,
-            chars: text.char_indices().peekable_nth(),
+            chars: LowLevelLexer::new(options, file_id, text, diagnostics).peekable_nth(),
             tokenize_preprocessor: options.tokenize_preprocessor,
         }
     }
@@ -119,7 +120,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn operator(&mut self, idx0: u32) -> Token {
-        let maybe_idx1 = self.take_until(idx0, |lookahead: Lookahead| match lookahead {
+        let maybe_idx1 = self.take_until(|lookahead: Lookahead| match lookahead {
             Lookahead::Character(_, c) if is_operator_continue(c) => Continue,
             Lookahead::Character(_, '.') => Stop,
             _ => Abort,
@@ -159,7 +160,7 @@ impl<'input> Tokenizer<'input> {
 
     fn identifierish(&mut self, idx0: u32) -> Token {
         let idx1 = self
-            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+            .take_until(|lookahead: Lookahead| match lookahead {
                 Lookahead::Character(_, c) if is_identifier_continue(c) => Continue,
                 _ => Stop,
             })
@@ -182,7 +183,7 @@ impl<'input> Tokenizer<'input> {
         let tokenize_preprocessor = self.tokenize_preprocessor;
 
         let idx1 = self
-            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+            .take_until(|lookahead: Lookahead| match lookahead {
                 Lookahead::Character(_, c) if is_recognized_character(c, tokenize_preprocessor) => {
                     Stop
                 }
@@ -210,7 +211,7 @@ impl<'input> Tokenizer<'input> {
         // TODO: Add optional, non-standard support for escape sequences. See gfortran
         // -fbackslash option
         // See: https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
-        let maybe_idx1 = self.take_until_terminate(idx0, true, |lookahead: Lookahead| {
+        let maybe_idx1 = self.take_until_terminate(true, |lookahead: Lookahead| {
             if saw_closing_quote {
                 match lookahead {
                     Lookahead::Character(_, c) if c == quote => {
@@ -248,8 +249,8 @@ impl<'input> Tokenizer<'input> {
         self.token(TokenKind::CharLiteralConstant, idx0, idx1)
     }
 
-    fn take_digit_string(&mut self, idx0: u32) -> u32 {
-        self.take_until(idx0, |lookahead: Lookahead| match lookahead {
+    fn take_digit_string(&mut self) -> u32 {
+        self.take_until(|lookahead: Lookahead| match lookahead {
             Lookahead::Character(_, c) if is_digit(c) => Continue,
             _ => Stop,
         })
@@ -272,7 +273,7 @@ impl<'input> Tokenizer<'input> {
 
         match self.peek() {
             Lookahead::Character(_, c) if is_digit(c) => {
-                let idx1 = self.take_digit_string(idx0);
+                let idx1 = self.take_digit_string();
                 self.token(TokenKind::RealLiteralConstant, idx0, idx1)
             }
             lookahead => {
@@ -317,14 +318,14 @@ impl<'input> Tokenizer<'input> {
             _ => false,
         });
 
-        let idx1 = self.take_digit_string(idx0);
+        let idx1 = self.take_digit_string();
         debug_assert_ne!(idx1, idx0);
 
         self.finish_real_literal_constant(idx0)
     }
 
     fn numberish(&mut self, idx0: u32) -> Token {
-        let idx1 = self.take_digit_string(idx0);
+        let idx1 = self.take_digit_string();
 
         match self.peek() {
             Lookahead::Character(idx1, '.') => {
@@ -368,7 +369,7 @@ impl<'input> Tokenizer<'input> {
     // returns nothing - merely advances to end of comment.
     fn commentary(&mut self, idx0: u32) -> Token {
         let idx1 = self
-            .take_until(idx0, |lookahead: Lookahead| match lookahead {
+            .take_until(|lookahead: Lookahead| match lookahead {
                 Lookahead::Character(_, c) if is_new_line_start(c) => Stop,
                 Lookahead::EOF => Stop,
                 _ => Continue,
@@ -452,7 +453,7 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn continuation(&mut self, idx0: u32) -> bool {
+    fn continuation(&mut self) -> bool {
         let mut first_line = true;
 
         loop {
@@ -499,9 +500,7 @@ impl<'input> Tokenizer<'input> {
                 // ended. The new character is a new token.
                 Lookahead::Character(_, _) => false,
                 // Treat an unterminated continuation as one that does not continue a token
-                Lookahead::EOF => {
-                    false
-                }
+                Lookahead::EOF => false,
             };
         }
     }
@@ -512,16 +511,21 @@ impl<'input> Tokenizer<'input> {
     /// Returns None if continuation is skipped without issue. Return Some(err)
     /// if there was an issue in the continuation.
     fn skip_continuation(&mut self) -> bool {
-        if let Lookahead::Character(idx0, '&') = self.peek() {
+        if let Lookahead::Character(_, '&') = self.peek() {
             self.bump();
-            self.continuation(idx0)
+            self.continuation()
         } else {
             true
         }
     }
 
-    fn get_next(&mut self, lookahead: (u32, char)) -> Token {
-        match lookahead {
+    fn get_next(&mut self) -> Token {
+        let peeked = match self.peek() {
+            Lookahead::Character(i, c) => (i, c),
+            _ => panic!("Internal compiler error: We should be at EOF"),
+        };
+
+        match peeked {
             (idx0, '=') => {
                 self.bump();
 
@@ -709,7 +713,7 @@ impl<'input> Tokenizer<'input> {
                     self.bump();
                     continue;
                 }
-                Lookahead::Character(idx, c) => Some(self.get_next((idx, c))),
+                Lookahead::Character(_, _) => Some(self.get_next()),
                 Lookahead::EOF => None,
             };
         }
@@ -717,7 +721,6 @@ impl<'input> Tokenizer<'input> {
 
     fn take_until_terminate<F>(
         &mut self,
-        idx0: u32,
         require_continue_context: bool,
         mut terminate: F,
     ) -> Result<u32, u32>
@@ -728,7 +731,7 @@ impl<'input> Tokenizer<'input> {
             return match self.peek() {
                 Lookahead::Character(idx1, '&') => {
                     self.bump();
-                    let continue_context = self.continuation(idx0);
+                    let continue_context = self.continuation();
                     if require_continue_context && !continue_context {
                         let lookahead = self.peek();
                         self.emit_error(
@@ -781,11 +784,11 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
-    fn take_until<F>(&mut self, idx0: u32, terminate: F) -> Result<u32, u32>
+    fn take_until<F>(&mut self, terminate: F) -> Result<u32, u32>
     where
         F: FnMut(Lookahead) -> TakeUntil,
     {
-        self.take_until_terminate(idx0, false, terminate)
+        self.take_until_terminate(false, terminate)
     }
 
     fn peek_nth(&mut self, n: usize) -> Lookahead {
@@ -793,6 +796,45 @@ impl<'input> Tokenizer<'input> {
             .peek_nth(n)
             .map(|(i, c)| Lookahead::Character(*i as u32, *c))
             .unwrap_or(Lookahead::EOF)
+    }
+
+    /// R765: binary-constant
+    fn at_binary_constant_start(&mut self) -> bool {
+        match self.peek_nth(0) {
+            Lookahead::Character(_, 'b') | Lookahead::Character(_, 'B') => {}
+            _ => return false,
+        };
+
+        match self.peek_nth(1) {
+            Lookahead::Character(_, '\'') | Lookahead::Character(_, '"') => true,
+            _ => false,
+        }
+    }
+
+    /// R766: octal-constant
+    fn at_octal_constant_start(&mut self) -> bool {
+        match self.peek_nth(0) {
+            Lookahead::Character(_, 'o') | Lookahead::Character(_, 'O') => {}
+            _ => return false,
+        };
+
+        match self.peek_nth(1) {
+            Lookahead::Character(_, '\'') | Lookahead::Character(_, '"') => true,
+            _ => false,
+        }
+    }
+
+    /// R767: hex-constant
+    fn at_hex_constant_start(&mut self) -> bool {
+        match self.peek_nth(0) {
+            Lookahead::Character(_, 'z') | Lookahead::Character(_, 'Z') => {}
+            _ => return false,
+        };
+
+        match self.peek_nth(1) {
+            Lookahead::Character(_, '\'') | Lookahead::Character(_, '"') => true,
+            _ => false,
+        }
     }
 
     fn peek(&mut self) -> Lookahead {
