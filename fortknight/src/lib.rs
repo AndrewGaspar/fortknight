@@ -91,8 +91,23 @@ impl AnalysisEngine {
         self.data.file_data.tokens.push(tokenizer.collect());
 
         if self.options.print_tokens {
+            let tokenize_preprocessor = self.data.file_data.file_names[file_id.0 as usize]
+                .extension()
+                == Some("F90".as_ref());
+
+            println!("{}", tokenize_preprocessor);
+
+            let tokenizer = parser::lex::Tokenizer::new(
+                &parser::lex::TokenizerOptions {
+                    tokenize_preprocessor,
+                },
+                file_id,
+                &self.data.file_data.contents.last().unwrap(),
+                &self.diagnostics,
+            );
+
             println!("Tokens:");
-            for t in &self.data.file_data.tokens[file_id.0 as usize] {
+            for t in tokenizer {
                 let location = self
                     .data
                     .file_data
