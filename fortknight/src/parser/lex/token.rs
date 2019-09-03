@@ -141,6 +141,10 @@ pub enum TokenKind {
     RealLiteralConstant,
     CharLiteralConstant,
     DigitString,
+    BinaryConstant,
+    OctalConstant,
+    HexConstant,
+
     DefinedOperator,
 
     // Symbols
@@ -207,6 +211,10 @@ impl TokenKind {
             RealLiteralConstant => "real-literal-constant".into(),
             CharLiteralConstant => "char-literal-constant".into(),
             DigitString => "digit-string".into(),
+            BinaryConstant => "binary-constant".into(),
+            OctalConstant => "octal-constant".into(),
+            HexConstant => "hex-constant".into(),
+
             DefinedOperator => "defined-operator".into(),
 
             AndOp => "`.AND.`".into(),

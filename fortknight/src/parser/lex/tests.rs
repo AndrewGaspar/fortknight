@@ -293,3 +293,43 @@ fn real_literal_constant() {
     assert_eq!(TokenKind::Unknown, get_tokens_unwrap(".0E+-9")[0]);
     assert_eq!(TokenKind::Unknown, get_tokens_unwrap("100.0d")[0]);
 }
+
+#[test]
+fn binary_constant() {
+    assert_eq!(
+        vec![TokenKind::BinaryConstant],
+        get_tokens_unwrap("b'010101'")
+    );
+    assert_eq!(
+        vec![TokenKind::BinaryConstant],
+        get_tokens_unwrap("B'010101'")
+    );
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("B''")[0]);
+}
+
+#[test]
+fn octal_constant() {
+    assert_eq!(
+        vec![TokenKind::OctalConstant],
+        get_tokens_unwrap("o'01234567'")
+    );
+    assert_eq!(
+        vec![TokenKind::OctalConstant],
+        get_tokens_unwrap("O'01234567'")
+    );
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("O''")[0]);
+}
+
+#[test]
+fn hex_constant() {
+    assert_eq!(
+        vec![TokenKind::HexConstant],
+        get_tokens_unwrap("z'0123456789ABCDEF'")
+    );
+    assert_eq!(
+        vec![TokenKind::HexConstant],
+        get_tokens_unwrap("Z'0123456789ABCDEF'")
+    );
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("z''")[0]);
+    assert_eq!(TokenKind::Unknown, get_tokens_unwrap("z'100G'")[0]);
+}

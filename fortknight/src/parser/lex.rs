@@ -402,6 +402,18 @@ impl<'input> Tokenizer<'input> {
     }
 
     fn get_next(&mut self) -> Token {
+        if self.at_binary_constant_start() {
+            return self.take_binary_constant();
+        }
+
+        if self.at_octal_constant_start() {
+            return self.take_octal_constant();
+        }
+
+        if self.at_hex_constant_start() {
+            return self.take_hex_constant();
+        }
+
         let peeked = match self.peek() {
             Lookahead::Character(i, c) => (i, c),
             _ => panic!("Internal compiler error: We should be at EOF"),
@@ -612,6 +624,57 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
+    /// R765: binary-constant
+    fn take_binary_constant(&mut self) -> Token {
+        let idx0 = match self.peek() {
+            Lookahead::Character(idx, 'b') | Lookahead::Character(idx, 'B') => {
+                self.bump();
+                idx
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let quote = match self.peek() {
+            Lookahead::Character(_, c) if c == '\'' || c == '"' => {
+                self.bump();
+                c
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let result = match self.peek() {
+            Lookahead::Character(_, c) if is_binary_digit(c) => {
+                self.bump();
+                self.take_until(|lookahead| match lookahead {
+                    Lookahead::Character(_, c) if is_binary_digit(c) => TakeUntil::Continue,
+                    Lookahead::Character(_, c) if c == quote => TakeUntil::Stop,
+                    _ => TakeUntil::Abort,
+                })
+            }
+            Lookahead::Character(idx, _) => Err(idx),
+            Lookahead::EOF => Err(self.text_len()),
+        };
+
+        match result {
+            Ok(idx1) => {
+                self.bump();
+                self.token(TokenKind::BinaryConstant, idx0, idx1 + 1)
+            }
+            Err(idx1) => {
+                self.emit_error(
+                    ExpectedBinaryConstant,
+                    idx0,
+                    idx1,
+                    &format!(
+                        "Expected `{}` to be a binary constant.",
+                        ContinuationStr::new(self.text_span(idx0, idx1))
+                    ),
+                );
+                self.token(TokenKind::Unknown, idx0, idx1)
+            }
+        }
+    }
+
     /// R766: octal-constant
     fn at_octal_constant_start(&mut self) -> bool {
         match self.peek_nth(0) {
@@ -625,6 +688,57 @@ impl<'input> Tokenizer<'input> {
         }
     }
 
+    /// R766: octal-constant
+    fn take_octal_constant(&mut self) -> Token {
+        let idx0 = match self.peek() {
+            Lookahead::Character(idx, 'o') | Lookahead::Character(idx, 'O') => {
+                self.bump();
+                idx
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let quote = match self.peek() {
+            Lookahead::Character(_, c) if c == '\'' || c == '"' => {
+                self.bump();
+                c
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let result = match self.peek() {
+            Lookahead::Character(_, c) if is_octal_digit(c) => {
+                self.bump();
+                self.take_until(|lookahead| match lookahead {
+                    Lookahead::Character(_, c) if is_octal_digit(c) => TakeUntil::Continue,
+                    Lookahead::Character(_, c) if c == quote => TakeUntil::Stop,
+                    _ => TakeUntil::Abort,
+                })
+            }
+            Lookahead::Character(idx, _) => Err(idx),
+            Lookahead::EOF => Err(self.text_len()),
+        };
+
+        match result {
+            Ok(idx1) => {
+                self.bump();
+                self.token(TokenKind::OctalConstant, idx0, idx1 + 1)
+            }
+            Err(idx1) => {
+                self.emit_error(
+                    ExpectedOctalConstant,
+                    idx0,
+                    idx1,
+                    &format!(
+                        "Expected `{}` to be an octal constant.",
+                        ContinuationStr::new(self.text_span(idx0, idx1))
+                    ),
+                );
+                self.token(TokenKind::Unknown, idx0, idx1)
+            }
+        }
+    }
+
     /// R767: hex-constant
     fn at_hex_constant_start(&mut self) -> bool {
         match self.peek_nth(0) {
@@ -635,6 +749,57 @@ impl<'input> Tokenizer<'input> {
         match self.peek_nth(1) {
             Lookahead::Character(_, '\'') | Lookahead::Character(_, '"') => true,
             _ => false,
+        }
+    }
+
+    /// R767: hex-constant
+    fn take_hex_constant(&mut self) -> Token {
+        let idx0 = match self.peek() {
+            Lookahead::Character(idx, 'z') | Lookahead::Character(idx, 'Z') => {
+                self.bump();
+                idx
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let quote = match self.peek() {
+            Lookahead::Character(_, c) if c == '\'' || c == '"' => {
+                self.bump();
+                c
+            }
+            _ => panic!("Internal compiler error"),
+        };
+
+        let result = match self.peek() {
+            Lookahead::Character(_, c) if is_hex_digit(c) => {
+                self.bump();
+                self.take_until(|lookahead| match lookahead {
+                    Lookahead::Character(_, c) if is_hex_digit(c) => TakeUntil::Continue,
+                    Lookahead::Character(_, c) if c == quote => TakeUntil::Stop,
+                    _ => TakeUntil::Abort,
+                })
+            }
+            Lookahead::Character(idx, _) => Err(idx),
+            Lookahead::EOF => Err(self.text_len()),
+        };
+
+        match result {
+            Ok(idx1) => {
+                self.bump();
+                self.token(TokenKind::HexConstant, idx0, idx1 + 1)
+            }
+            Err(idx1) => {
+                self.emit_error(
+                    ExpectedHexConstant,
+                    idx0,
+                    idx1,
+                    &format!(
+                        "Expected `{}` to be a hex constant.",
+                        ContinuationStr::new(self.text_span(idx0, idx1))
+                    ),
+                );
+                self.token(TokenKind::Unknown, idx0, idx1)
+            }
         }
     }
 
@@ -687,6 +852,18 @@ fn is_new_line_start(c: char) -> bool {
 
 fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
+}
+
+fn is_binary_digit(c: char) -> bool {
+    c == '0' || c == '1'
+}
+
+fn is_octal_digit(c: char) -> bool {
+    c >= '0' && c <= '7'
+}
+
+fn is_hex_digit(c: char) -> bool {
+    is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 fn is_recognized_character(c: char, tokenize_preprocessor: bool) -> bool {

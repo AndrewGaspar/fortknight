@@ -128,6 +128,9 @@ pub enum ParserErrorCode {
     UnterminatedCBlockComment,
     ExpectedEOS,
     ExpectedToken,
+    ExpectedBinaryConstant,
+    ExpectedOctalConstant,
+    ExpectedHexConstant,
 }
 
 impl ParserErrorCode {
@@ -147,6 +150,9 @@ impl ParserErrorCode {
             UnterminatedCBlockComment => 9,
             ExpectedEOS => 10,
             ExpectedToken => 11,
+            ExpectedBinaryConstant => 12,
+            ExpectedOctalConstant => 13,
+            ExpectedHexConstant => 14,
         };
         debug_assert!(code < 1000);
         code
