@@ -26,3 +26,16 @@ fn basic() {
     assert_eq!("howdyall", ll_lex("howdy&\n  !comment\n&all"));
     assert_eq!("howdy all", ll_lex("howdy&\n  !comment\n& all"));
 }
+
+#[test]
+fn in_string_literal() {
+    assert_eq!("\"howdyall\"", ll_lex("\"howdy&\n&all\""));
+    assert_eq!(
+        "\"howdy!commentall\"",
+        ll_lex("\"howdy&\n&!comment&\n&all\"")
+    );
+
+    // this is erroneous, but this is how we want the low level lexer to handle the error case
+    assert_eq!("\"howdyall\"", ll_lex("\"howdy&\nall\""));
+    assert_eq!("\"howdy all\"", ll_lex("\"howdy&\n all\""));
+}

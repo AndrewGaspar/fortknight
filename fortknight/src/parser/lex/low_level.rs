@@ -23,6 +23,7 @@ pub struct LowLevelLexer<'input> {
     chars: PeekableNth<CharIndices<'input>>,
     tokenize_preprocessor: bool,
     fresh_new_line: bool,
+    opening_quote: Option<char>,
 }
 
 impl<'input> LowLevelLexer<'input> {
@@ -44,6 +45,7 @@ impl<'input> LowLevelLexer<'input> {
             chars: text.char_indices().peekable_nth(),
             tokenize_preprocessor: options.tokenize_preprocessor,
             fresh_new_line: true,
+            opening_quote: None,
         }
     }
 
@@ -172,7 +174,8 @@ impl<'input> LowLevelLexer<'input> {
         // Resolve first line
         loop {
             match self.peek() {
-                Some((_, '!')) => {
+                // Commentary is ignored inside a string literal
+                Some((_, '!')) if self.opening_quote.is_none() => {
                     self.skip_commentary();
                     self.consume_new_line();
                     break;
@@ -216,12 +219,13 @@ impl<'input> LowLevelLexer<'input> {
         let mut first_seen_whitepace = None;
         loop {
             match self.peek_nth(advance_by) {
-                Some((_, '!')) => {
+                Some((_, '!')) if self.opening_quote.is_none() => {
                     advance_by = self.peek_past_commentary(advance_by);
                     // this was a commentary line, so forget the whitespace we saw
                     first_seen_whitepace = None;
                 }
-                Some((_, c)) if c.is_whitespace() => {
+                // Whitespace, or lack of whitespace, is always significant in a string-literal
+                Some((_, c)) if self.opening_quote.is_none() && c.is_whitespace() => {
                     // Whitespace only later becomes significant if it turns out we're not in a
                     // token continuation
                     if first_seen_whitepace.is_none() {
@@ -273,6 +277,19 @@ impl<'input> LowLevelLexer<'input> {
                     return None;
                 }
                 Some((idx, _)) => {
+                    // When in a string literal, even though it's erroneous to not have a
+                    // continuation, just continue from the first column, even if it's not
+                    // whitespace
+                    if self.opening_quote.is_some() {
+                        self.emit_error(
+                            ParserErrorCode::DiscontinuedCharacterContext,
+                            idx0,
+                            idx,
+                            "Missing continuation ('&') of string literal",
+                        );
+                        return self.bump_nth(advance_by);
+                    }
+
                     // If we encounter a significant character, then we know we're merely continuing
                     // the statement, and not continuing the lexical token. Therefore we must emit
                     // at least one whitespace, even if none appear on this line. We emit the first
@@ -313,6 +330,14 @@ impl<'input> Iterator for LowLevelLexer<'input> {
                 Some((_, '\r')) | Some((_, '\n')) => {
                     self.fresh_new_line = true;
                     self.consume_new_line()
+                }
+                Some((_, c)) if self.opening_quote.is_none() && (c == '\'' || c == '"') => {
+                    self.opening_quote = Some(c);
+                    self.bump()
+                }
+                Some((_, c)) if Some(c) == self.opening_quote => {
+                    self.opening_quote = None;
+                    self.bump()
                 }
                 _ => {
                     self.fresh_new_line = false;
