@@ -1,8 +1,11 @@
+use num_bigint::BigUint;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
+use typed_arena::Arena;
 
 use crate::data::FileData;
 use crate::intern::{InternedName, StringInterner};
+use crate::num::Uint;
 use crate::span::{Location, Span};
 use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 
@@ -126,6 +129,116 @@ impl Token {
     pub fn friendly_name(&self) -> String {
         self.kind.friendly_name()
     }
+
+    /// R604: literal-constant
+    pub fn try_into_uint<'a>(&self, contents: &str, arena: &'a Arena<BigUint>) -> Option<Uint<'a>> {
+        fn convert_to_uint<'input, 'a, CharToDigit>(
+            cont_str: ContinuationStr<'input>,
+            arena: &'a Arena<BigUint>,
+            radix: u8,
+            char_to_digit: CharToDigit,
+        ) -> Uint<'a>
+        where
+            CharToDigit: Fn(char) -> u8,
+        {
+            enum Either {
+                Small(u32),
+                Big(BigUint),
+            }
+
+            let result = cont_str.iter().fold(Either::Small(0), |mut u, c| {
+                let digit = char_to_digit(c);
+                debug_assert!(digit < radix);
+
+                loop {
+                    return match u {
+                        Either::Small(x) => {
+                            match x
+                                .checked_mul(radix as u32)
+                                .and_then(|x| x.checked_add(digit as u32))
+                            {
+                                Some(x) => Either::Small(x),
+                                None => {
+                                    u = Either::Big(x.into());
+                                    continue;
+                                }
+                            }
+                        }
+                        Either::Big(mut x) => {
+                            x *= radix as u32;
+                            x += digit as u32;
+                            Either::Big(x)
+                        }
+                    };
+                }
+            });
+
+            match result {
+                Either::Small(x) => Uint::Small(x),
+                Either::Big(x) => Uint::Big(arena.alloc(x)),
+            }
+        }
+
+        let contents = &contents[self.span.start as usize..self.span.end as usize];
+
+        Some(match self.kind {
+            TokenKind::DigitString => {
+                let cont_str = ContinuationStr::new(contents);
+                convert_to_uint(cont_str, arena, 10, |c| {
+                    let c = c as u8;
+                    debug_assert!(c >= b'0' && c <= b'9', "{}", c);
+                    c - b'0'
+                })
+            }
+            TokenKind::BinaryConstant => {
+                // skip leading b' and ending '
+                let cont_str = ContinuationStr::new(
+                    &contents[self.span.start as usize + 2..self.span.end as usize - 1],
+                );
+                convert_to_uint(cont_str, arena, 2, |c| {
+                    let c = c as u8;
+                    debug_assert!(c >= b'0' && c <= b'1', "{}", c);
+                    c - b'0'
+                })
+            }
+            TokenKind::OctalConstant => {
+                // skip leading o' and ending '
+                let cont_str = ContinuationStr::new(
+                    &contents[self.span.start as usize + 2..self.span.end as usize - 1],
+                );
+                convert_to_uint(cont_str, arena, 8, |c| {
+                    let c = c as u8;
+                    debug_assert!(c >= b'0' && c <= b'7', "{}", c);
+                    c - b'0'
+                })
+            }
+            TokenKind::HexConstant => {
+                // skip leading z' and ending '
+                let cont_str = ContinuationStr::new(
+                    &contents[self.span.start as usize + 2..self.span.end as usize - 1],
+                );
+                convert_to_uint(cont_str, arena, 16, |c| {
+                    let c = c as u8;
+                    debug_assert!(
+                        (c >= b'0' && c <= b'9')
+                            || (c >= b'a' && c <= b'f')
+                            || (c >= b'A' && c <= b'F'),
+                        "{}",
+                        c
+                    );
+                    if c >= b'0' && c <= b'9' {
+                        c - b'0'
+                    } else if c >= b'a' && c <= b'f' {
+                        c - b'a' + 10
+                    } else {
+                        debug_assert!(c >= b'A' && c <= b'F', "{}", c);
+                        c - b'A' + 10
+                    }
+                })
+            }
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -169,6 +282,7 @@ pub enum TokenKind {
     Plus,
     Slash,
     SlashSlash,
+    SlashRightParen,
     Star,
     StarStar,
     Colon,
@@ -182,8 +296,10 @@ pub enum TokenKind {
     LeftAngleEquals,
     RightAngle,
     RightAngleEquals,
+    Underscore,
 
     LeftParen,
+    LeftParenSlash,
     RightParen,
     LeftBracket,
     RightBracket,
@@ -238,6 +354,7 @@ impl TokenKind {
             Plus => "`+`".into(),
             Slash => "`/`".into(),
             SlashSlash => "`//`".into(),
+            SlashRightParen => "`/)`".into(),
             Star => "`*`".into(),
             StarStar => "`**`".into(),
             Colon => "`:`".into(),
@@ -251,8 +368,10 @@ impl TokenKind {
             LeftAngleEquals => "`<=`".into(),
             RightAngle => "`>`".into(),
             RightAngleEquals => "`>=`".into(),
+            Underscore => "`_`".into(),
 
             LeftParen => "`(`".into(),
+            LeftParenSlash => "`(/`".into(),
             RightParen => "`)`".into(),
             LeftBracket => "`[`".into(),
             RightBracket => "`]`".into(),
@@ -264,13 +383,6 @@ impl TokenKind {
         }
     }
 
-    pub fn is_name(&self) -> bool {
-        match self {
-            TokenKind::Name | TokenKind::Keyword(_) | TokenKind::Letter(_) => true,
-            _ => false,
-        }
-    }
-
     pub fn is_eos(&self) -> bool {
         match self {
             TokenKind::NewLine | TokenKind::SemiColon | TokenKind::Commentary => true,
@@ -278,6 +390,278 @@ impl TokenKind {
         }
     }
 
+    /// R603: name
+    #[inline]
+    pub fn is_name(&self) -> bool {
+        match self {
+            TokenKind::Name | TokenKind::Keyword(_) | TokenKind::Letter(_) => true,
+            _ => false,
+        }
+    }
+
+    /// R604: constant
+    #[inline]
+    pub fn is_constant_start(&self) -> bool {
+        if self.is_literal_constant_start() {
+            return true;
+        }
+
+        self.is_name()
+    }
+
+    /// R604: literal-constant
+    #[inline]
+    pub fn is_literal_constant_start(&self) -> bool {
+        if *self == TokenKind::DigitString || *self == TokenKind::RealLiteralConstant {
+            return true;
+        }
+
+        if self.is_complex_literal_constant_start() {
+            return true;
+        }
+
+        if self.is_logical_literal_constant_start() {
+            return true;
+        }
+
+        if self.is_char_literal_constant_start() {
+            return true;
+        }
+
+        if self.is_boz_literal_constant() {
+            return true;
+        }
+
+        false
+    }
+
+    /// R709: kind-param
+    #[inline]
+    pub fn is_kind_param_start(&self) -> bool {
+        match self {
+            TokenKind::DigitString => true,
+            t if t.is_name() => true,
+            _ => false,
+        }
+    }
+
+    /// R712: sign
+    ///     is +
+    ///     or -
+    #[inline]
+    pub fn is_sign(&self) -> bool {
+        match self {
+            TokenKind::Plus | TokenKind::Minus => true,
+            _ => false,
+        }
+    }
+
+    /// R718: complex-literal-constant
+    #[inline]
+    pub fn is_complex_literal_constant_start(&self) -> bool {
+        *self == TokenKind::LeftParen
+    }
+
+    /// R724: char-literal-constant
+    #[inline]
+    pub fn is_char_literal_constant_start(&self) -> bool {
+        if self.is_kind_param_start() {
+            return true;
+        }
+
+        *self == TokenKind::CharLiteralConstant
+    }
+
+    /// R725: logical-literal-constant
+    #[inline]
+    pub fn is_logical_literal_constant_start(&self) -> bool {
+        match self {
+            TokenKind::True | TokenKind::False => true,
+            _ => false,
+        }
+    }
+
+    /// R764: boz-literal-constant
+    #[inline]
+    pub fn is_boz_literal_constant(&self) -> bool {
+        match self {
+            TokenKind::BinaryConstant | TokenKind::OctalConstant | TokenKind::HexConstant => true,
+            _ => false,
+        }
+    }
+
+    /// R769: array-constructor
+    #[inline]
+    pub fn is_array_constructor_start(&self) -> bool {
+        *self == TokenKind::LeftBracket || *self == TokenKind::LeftParenSlash
+    }
+
+    /// R901: designator
+    #[inline]
+    pub fn is_designator_start(&self) -> bool {
+        // self.is_name() || self.is_array_element_start() || self.is_array_section_start()
+        //     || self.is_coindexed_named_object_start() || self.is_complex_part_designator_start()
+        //     || self.is_structure_component_start() || self.is_substring_start()
+
+        // designators always start with a name
+        self.is_name()
+    }
+
+    /// R908: substring
+    #[inline]
+    pub fn is_substring_start(&self) -> bool {
+        self.is_parent_string_start()
+    }
+
+    /// R909: parent-string
+    #[inline]
+    pub fn is_parent_string_start(&self) -> bool {
+        self.is_name()
+    }
+
+    /// R911: data-ref
+    #[inline]
+    pub fn is_data_ref_start(&self) -> bool {
+        self.is_part_ref_start()
+    }
+
+    /// R912: part-ref
+    #[inline]
+    pub fn is_part_ref_start(&self) -> bool {
+        self.is_name()
+    }
+
+    /// R913: structure-component
+    #[inline]
+    pub fn is_structure_component_start(&self) -> bool {
+        self.is_data_ref_start()
+    }
+
+    /// R914: coindexed-named-object
+    #[inline]
+    pub fn is_coindexed_named_object_start(&self) -> bool {
+        self.is_data_ref_start()
+    }
+
+    /// R915: complex-part-designator
+    #[inline]
+    pub fn is_complex_part_designator_start(&self) -> bool {
+        self.is_data_ref_start()
+    }
+
+    /// R917: array-element
+    #[inline]
+    pub fn is_array_element_start(&self) -> bool {
+        self.is_data_ref_start()
+    }
+
+    /// R918: array-section
+    #[inline]
+    pub fn is_array_section_start(&self) -> bool {
+        self.is_data_ref_start() || self.is_complex_part_designator_start()
+    }
+
+    /// R1001: primary
+    #[inline]
+    pub fn is_primary_start(&self) -> bool {
+        self.is_literal_constant_start()
+            || self.is_name() // covers designator, structure-constructor, function-reference, 
+                              // type-param-inquiry, type-param-name
+            || self.is_array_constructor_start()
+            || *self == TokenKind::LeftParen
+    }
+
+    /// R1002: level-1-expr
+    #[inline]
+    pub fn is_level_1_expr_start(&self) -> bool {
+        self.is_primary_start() || *self == TokenKind::DefinedOperator
+    }
+
+    /// R1004: mult-operand
+    #[inline]
+    pub fn is_mult_operand_start(&self) -> bool {
+        self.is_level_1_expr_start()
+    }
+
+    /// R1005: add-operand
+    #[inline]
+    pub fn is_add_operand_start(&self) -> bool {
+        self.is_mult_operand_start()
+    }
+
+    /// R1006: level-2-expr
+    #[inline]
+    pub fn is_level_2_expr_start(&self) -> bool {
+        self.is_add_op() || self.is_add_operand_start()
+    }
+
+    /// R1007: power-op
+    #[inline]
+    pub fn is_power_op(&self) -> bool {
+        *self == TokenKind::StarStar
+    }
+
+    /// R1008: mult-op
+    #[inline]
+    pub fn is_mult_op(&self) -> bool {
+        match self {
+            TokenKind::Star | TokenKind::Slash => true,
+            _ => false,
+        }
+    }
+
+    /// R1009: add-op
+    #[inline]
+    pub fn is_add_op(&self) -> bool {
+        match self {
+            TokenKind::Plus | TokenKind::Minus => true,
+            _ => false,
+        }
+    }
+
+    /// R1010: level-3-expr
+    #[inline]
+    pub fn is_level_3_expr_start(&self) -> bool {
+        self.is_level_2_expr_start()
+    }
+
+    /// R1012: level-4-expr
+    #[inline]
+    pub fn is_level_4_expr_start(&self) -> bool {
+        self.is_level_3_expr_start()
+    }
+
+    /// R1014: and-operand
+    #[inline]
+    pub fn is_and_operand_start(&self) -> bool {
+        self.is_level_4_expr_start() || *self == TokenKind::NotOp
+    }
+
+    /// R1015: or-operand
+    #[inline]
+    pub fn is_or_operand_start(&self) -> bool {
+        self.is_and_operand_start()
+    }
+
+    /// R1016: equiv-operand
+    #[inline]
+    pub fn is_equiv_operand_start(&self) -> bool {
+        self.is_or_operand_start()
+    }
+
+    /// R1017: level-5-expr
+    #[inline]
+    pub fn is_level_5_expr_start(&self) -> bool {
+        self.is_equiv_operand_start()
+    }
+
+    /// R1022: expr
+    #[inline]
+    pub fn is_expr_start(&self) -> bool {
+        self.is_level_5_expr_start()
+    }
+
+    #[inline]
     pub fn is_intrinsic_type_spec_start(&self) -> bool {
         match self {
             TokenKind::Keyword(KeywordTokenKind::Integer)
@@ -291,6 +675,7 @@ impl TokenKind {
         }
     }
 
+    #[inline]
     pub fn is_declaration_type_spec_start(&self) -> bool {
         if self.is_intrinsic_type_spec_start() {
             return true;

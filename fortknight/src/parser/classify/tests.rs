@@ -13,6 +13,7 @@ use crate::parser::classify::{Classifier, ClassifierArena, StmtKind};
 use crate::parser::lex::TokenizerOptions;
 use crate::span::Span;
 
+mod assignment_tests;
 mod block_tests;
 mod implicit_tests;
 

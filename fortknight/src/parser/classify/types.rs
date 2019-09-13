@@ -4,7 +4,7 @@ use super::statements::{
     DeclarationTypeSpec, DerivedTypeSpec, IntegerTypeSpec, IntrinsicTypeSpec, KindSelector,
     Spanned, TypeParamSpec, TypeParamValue,
 };
-use super::{declaration_type_spec_or, intrinsic_type_spec_or, Classifier, Lookahead, TakeUntil};
+use super::{declaration_type_spec_or, intrinsic_type_spec_or, Classifier, TakeUntil};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// R701: type-param-value
@@ -25,7 +25,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 // couldn't possibly be an expression.
                 let expr = self.expr()?;
                 Some(Spanned::new(
-                    TypeParamValue::ScalarIntExpr(expr.val),
+                    TypeParamValue::ScalarIntExpr(self.arena.expressions.alloc(expr.val)),
                     expr.span,
                 ))
             }
@@ -307,7 +307,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         // parse scalar-int-constant-expr
         Some(Spanned::new(
-            KindSelector(expr.val),
+            KindSelector(self.arena.expressions.alloc(expr.val)),
             begin_span.concat(end_span),
         ))
     }
@@ -377,12 +377,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         if error_encountered {
             // skip to the closing ), EOS, or EOF
             self.take_until(|lookahead| match lookahead {
-                Lookahead::Token(Token {
+                Some(Token {
                     kind: TokenKind::RightParen,
                     ..
                 })
-                | Lookahead::EOF => TakeUntil::Stop,
-                Lookahead::Token(t) if Self::is_eos(t) => TakeUntil::Stop,
+                | None => TakeUntil::Stop,
+                Some(t) if Self::is_eos(t) => TakeUntil::Stop,
                 _ => TakeUntil::Continue,
             })
             .unwrap();

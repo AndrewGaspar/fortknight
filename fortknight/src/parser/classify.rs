@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt::Write;
 
+use num_bigint::BigUint;
 use peek_nth::{IteratorExt, PeekableNth};
 use typed_arena::Arena;
 
@@ -10,7 +11,9 @@ use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
+mod assignment;
 mod block;
+mod expressions;
 mod implicit;
 mod import_stmt;
 mod statements;
@@ -44,6 +47,8 @@ pub struct ClassifierArena<'arena> {
     implicit_specs: Arena<Spanned<ImplicitSpec<'arena>>>,
     type_param_specs: Arena<TypeParamSpec<'arena>>,
     letter_specs: Arena<LetterSpec>,
+    expressions: Arena<Expr<'arena>>,
+    big_uints: Arena<BigUint>,
 }
 
 impl<'arena> ClassifierArena<'arena> {
@@ -243,11 +248,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     fn take_until<F>(&mut self, mut terminate: F) -> Result<u32, u32>
     where
-        F: FnMut(Lookahead) -> TakeUntil,
+        F: FnMut(Option<&Token>) -> TakeUntil,
     {
         loop {
             return match self.peek() {
-                Some(t) => match terminate(Lookahead::Token(t)) {
+                Some(t) => match terminate(Some(t)) {
                     TakeUntil::Continue => {
                         self.bump();
                         continue;
@@ -255,7 +260,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     TakeUntil::Stop => Ok(t.span.end),
                     TakeUntil::Abort => Err(t.span.end),
                 },
-                None => match terminate(Lookahead::EOF) {
+                None => match terminate(None) {
                     TakeUntil::Continue => panic!("Internal error: Tried to classify past EOF!"),
                     TakeUntil::Stop => Ok(self.text_len()),
                     TakeUntil::Abort => Err(self.text_len()),
@@ -333,14 +338,6 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 )
             }
         };
-    }
-
-    /// R1022: expr
-    ///
-    /// Parses an expression from the beginning of the expression. When an error is encountered, an
-    /// error is emitted and None is returned without consuming the erroneous token.
-    fn expr(&mut self) -> Option<Spanned<Expr<'arena>>> {
-        unimplemented!()
     }
 
     fn program(&mut self, start_span: &Span) -> Stmt<'arena> {
@@ -641,6 +638,19 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
+        // Look ahead for assignments
+        // TODO: This just looks for a variable name then =, which is incomplete. Need to support
+        // array elements, array sections, substrings, structure components, etc.
+        match self.peek_nth_kind(0) {
+            Some(t) if t.is_name() => match self.peek_nth_kind(1) {
+                Some(TokenKind::Equals) => {
+                    return Some(self.assignment_stmt());
+                }
+                _ => {}
+            },
+            _ => {}
+        };
+
         let token = self.tokenizer.next()?;
 
         let stmt = match token.kind {
@@ -663,6 +673,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             TokenKind::Keyword(KeywordTokenKind::EndBlockData) => {
                 self.stmt_from_end_block_data(token.span)
             }
+            t if t.is_eos() => Stmt {
+                kind: StmtKind::Empty,
+                span: token.span,
+            },
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
 
@@ -677,12 +691,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn skip_to_comma_or_eos(&mut self) -> Option<()> {
         // advance to next `only` or EOS
         self.take_until(|lookahead| match lookahead {
-            Lookahead::Token(&Token {
+            Some(&Token {
                 kind: TokenKind::Comma,
                 ..
             }) => TakeUntil::Stop,
-            Lookahead::Token(t) if Self::is_eos(t) => TakeUntil::Stop,
-            Lookahead::EOF => TakeUntil::Stop,
+            Some(t) if Self::is_eos(t) => TakeUntil::Stop,
+            None => TakeUntil::Stop,
             _ => TakeUntil::Continue,
         })
         .unwrap();

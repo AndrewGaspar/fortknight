@@ -8,6 +8,7 @@ pub mod data;
 pub mod error;
 mod index;
 mod intern;
+pub mod num;
 mod parser;
 mod span;
 pub mod string;

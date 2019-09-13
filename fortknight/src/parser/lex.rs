@@ -464,6 +464,10 @@ impl<'input> Tokenizer<'input> {
                         self.bump();
                         self.token(TokenKind::SlashEquals, idx0, idx1 + 1)
                     }
+                    Lookahead::Character(idx1, ')') => {
+                        self.bump();
+                        self.token(TokenKind::SlashRightParen, idx0, idx1 + 1)
+                    }
                     Lookahead::Character(_, '*') if self.tokenize_preprocessor => {
                         self.bump();
                         self.c_block_commentary(idx0)
@@ -473,32 +477,38 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '%') => {
                 self.bump();
-                (self.token(TokenKind::Percent, idx0, idx0 + 1))
+                self.token(TokenKind::Percent, idx0, idx0 + 1)
             }
             (idx0, '(') => {
                 self.bump();
-                (self.token(TokenKind::LeftParen, idx0, idx0 + 1))
+                match self.peek() {
+                    Lookahead::Character(idx1, '/') => {
+                        self.bump();
+                        self.token(TokenKind::LeftParenSlash, idx0, idx1 + 1)
+                    }
+                    _ => self.token(TokenKind::LeftParen, idx0, idx0 + 1),
+                }
             }
             (idx0, ')') => {
                 self.bump();
-                (self.token(TokenKind::RightParen, idx0, idx0 + 1))
+                self.token(TokenKind::RightParen, idx0, idx0 + 1)
             }
             (idx0, '[') => {
                 self.bump();
-                (self.token(TokenKind::LeftBracket, idx0, idx0 + 1))
+                self.token(TokenKind::LeftBracket, idx0, idx0 + 1)
             }
             (idx0, ']') => {
                 self.bump();
-                (self.token(TokenKind::RightBracket, idx0, idx0 + 1))
+                self.token(TokenKind::RightBracket, idx0, idx0 + 1)
             }
             (idx0, '<') => {
                 self.bump();
                 match self.peek() {
                     Lookahead::Character(idx1, '=') => {
                         self.bump();
-                        (self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1))
+                        self.token(TokenKind::LeftAngleEquals, idx0, idx1 + 1)
                     }
-                    _ => (self.token(TokenKind::LeftAngle, idx0, idx0 + 1)),
+                    _ => self.token(TokenKind::LeftAngle, idx0, idx0 + 1),
                 }
             }
             (idx0, '>') => {
@@ -506,9 +516,9 @@ impl<'input> Tokenizer<'input> {
                 match self.peek() {
                     Lookahead::Character(idx1, '=') => {
                         self.bump();
-                        (self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1))
+                        self.token(TokenKind::RightAngleEquals, idx0, idx1 + 1)
                     }
-                    _ => (self.token(TokenKind::RightAngle, idx0, idx0 + 1)),
+                    _ => self.token(TokenKind::RightAngle, idx0, idx0 + 1),
                 }
             }
             (idx0, '.') => {
@@ -519,42 +529,46 @@ impl<'input> Tokenizer<'input> {
                     // If followed by a digit, then this must be an real literal constant
                     Lookahead::Character(_, c) if is_digit(c) => self.decimal(idx0),
                     // else just return the dot token
-                    _ => (self.token(TokenKind::Dot, idx0, idx0 + 1)),
+                    _ => self.token(TokenKind::Dot, idx0, idx0 + 1),
                 }
             }
             (idx0, ',') => {
                 self.bump();
-                (self.token(TokenKind::Comma, idx0, idx0 + 1))
+                self.token(TokenKind::Comma, idx0, idx0 + 1)
             }
             (idx0, ':') => {
                 self.bump();
                 match self.peek() {
                     Lookahead::Character(idx1, ':') => {
                         self.bump();
-                        (self.token(TokenKind::ColonColon, idx0, idx1 + 1))
+                        self.token(TokenKind::ColonColon, idx0, idx1 + 1)
                     }
-                    _ => (self.token(TokenKind::Colon, idx0, idx0 + 1)),
+                    _ => self.token(TokenKind::Colon, idx0, idx0 + 1),
                 }
             }
             (idx0, ';') => {
                 self.bump();
-                (self.token(TokenKind::SemiColon, idx0, idx0 + 1))
+                self.token(TokenKind::SemiColon, idx0, idx0 + 1)
+            }
+            (idx0, '_') => {
+                self.bump();
+                self.token(TokenKind::Underscore, idx0, idx0 + 1)
             }
             (idx0, c) if (c == '"' || c == '\'') => {
                 self.bump();
                 self.string_literal(idx0, c)
             }
-            (idx0, c) if is_digit(c) => {
+            (idx0, c) if c.is_ascii_digit() => {
                 self.bump();
                 self.numberish(idx0)
             }
             (idx0, '!') => {
                 self.bump();
-                (self.commentary(idx0))
+                self.commentary(idx0)
             }
             (idx0, c) if is_identifier_start(c) => {
                 self.bump();
-                (self.identifierish(idx0))
+                self.identifierish(idx0)
             }
             (idx0, '#') if self.tokenize_preprocessor => {
                 self.bump();
