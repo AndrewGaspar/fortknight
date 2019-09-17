@@ -4,9 +4,9 @@ use crate::error::DiagnosticSink;
 use crate::intern::StringInterner;
 use crate::num::Uint;
 use crate::parser::classify::statements::{
-    AssignmentStmt, Designator, DigitString, Exponent, ExponentLetter, ExponentPart, Expr,
-    IntLiteralConstant, LiteralConstant, PrimaryRaw, RealLiteralConstant, Sign, SignedDigitString,
-    Significand, Spanned, Variable,
+    AssignmentStmt, CharLiteralConstant, Designator, DigitString, Exponent, ExponentLetter,
+    ExponentPart, Expr, IntLiteralConstant, KindParam, LiteralConstant, PrimaryRaw,
+    RealLiteralConstant, Sign, SignedDigitString, Significand, Spanned, Variable,
 };
 use crate::parser::classify::{ClassifierArena, StmtKind};
 use std::cell::RefCell;
@@ -93,6 +93,154 @@ fn assignment() {
                     }
                 })
             ],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = 'howdy, partner!'", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: None,
+                            string: "howdy, partner!",
+                        })
+                    )),
+                    span: test_span(6, 23)
+                }
+            }),],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = 'howdy, ''partner''!'", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: None,
+                            string: "howdy, 'partner'!",
+                        })
+                    )),
+                    span: test_span(6, 27)
+                }
+            }),],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = 'howdy, \"partner\"!'", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: None,
+                            string: "howdy, \"partner\"!",
+                        })
+                    )),
+                    span: test_span(6, 25)
+                }
+            }),],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "foo = \"howdy, \"\"partner\"\"!\"",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: None,
+                            string: "howdy, \"partner\"!",
+                        })
+                    )),
+                    span: test_span(6, 27)
+                }
+            }),],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = bar_'howdy, partner!'", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: Some(KindParam::ScalarIntConstantName(bar)),
+                            string: "howdy, partner!",
+                        })
+                    )),
+                    span: test_span(6, 27)
+                }
+            }),],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier(
+            "foo = bar _ 'howdy, partner!'",
+            &sink,
+            &mut interner,
+            &arena,
+        );
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(CharLiteralConstant {
+                            kind_param: Some(KindParam::ScalarIntConstantName(bar)),
+                            string: "howdy, partner!",
+                        })
+                    )),
+                    span: test_span(6, 29)
+                }
+            }),],
             get_stmts(&mut c)
         );
     }

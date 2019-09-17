@@ -13,7 +13,15 @@ impl<'input> ContinuationStr<'input> {
     }
 
     pub fn iter(&self) -> ContinuationStrChars<'input> {
+        self.chars()
+    }
+
+    pub fn chars(&self) -> ContinuationStrChars<'input> {
         ContinuationStrChars::new(self.string.chars())
+    }
+
+    pub fn char_indices(&self) -> ContinuationStrCharIndices<'input> {
+        ContinuationStrCharIndices::new(self.string.char_indices())
     }
 }
 
@@ -69,6 +77,39 @@ impl<'input> Iterator for ContinuationStrChars<'input> {
 }
 
 #[derive(Clone, Debug)]
+pub struct ContinuationStrCharIndices<'input> {
+    str_iter: std::str::CharIndices<'input>,
+}
+
+impl<'input> ContinuationStrCharIndices<'input> {
+    fn new(str_iter: std::str::CharIndices<'input>) -> ContinuationStrCharIndices<'input> {
+        ContinuationStrCharIndices { str_iter: str_iter }
+    }
+}
+
+// Iterator over a FortranUserStr. Ignores continuation. This allows us to
+// tokenize the FORTRAN program without allocating any memory.
+impl<'input> Iterator for ContinuationStrCharIndices<'input> {
+    type Item = (usize, char);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // if we're here, we can assume that the string is already a
+        // valid identifier, which means the continuation is properly
+        // terminated. Just continue until we see a closing ampersand.
+        loop {
+            return match self.str_iter.next() {
+                Some(amp) if amp.1 == '&' => {
+                    while '&' != self.str_iter.next().unwrap().1 {}
+                    continue;
+                }
+                Some(x) => Some(x),
+                None => None,
+            };
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct CaseInsensitiveContinuationStr<'input> {
     user_str: ContinuationStr<'input>,
 }
@@ -81,7 +122,17 @@ impl<'input> CaseInsensitiveContinuationStr<'input> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = char> + 'input {
+        self.chars()
+    }
+
+    pub fn chars(&self) -> impl Iterator<Item = char> + 'input {
         self.user_str.iter().map(|c: char| c.to_ascii_lowercase())
+    }
+
+    pub fn char_indices(&self) -> impl Iterator<Item = (usize, char)> + 'input {
+        self.user_str
+            .char_indices()
+            .map(|(i, c)| (i, c.to_ascii_lowercase()))
     }
 }
 

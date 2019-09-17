@@ -1,16 +1,19 @@
 //! Expression parsing for classifier
 
+use std::iter::FromIterator;
+
 use num_bigint::BigUint;
 
 use crate::num::Uint;
-use crate::parser::lex::TokenKind;
-use crate::string::CaseInsensitiveContinuationStr;
+use crate::parser::lex::{Token, TokenKind};
+use crate::span::Span;
+use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 
 use super::statements::{
-    BozLiteralConstant, ComplexLiteralConstant, ComplexLiteralPart, DigitString, Exponent,
-    ExponentLetter, ExponentPart, Expr, IntLiteralConstant, KindParam, LiteralConstant, PrimaryRaw,
-    RealLiteralConstant, Sign, SignedDigitString, SignedIntLiteralConstant,
-    SignedRealLiteralConstant, Significand, Spanned, UnaryOp,
+    BozLiteralConstant, CharLiteralConstant, ComplexLiteralConstant, ComplexLiteralPart,
+    DigitString, Exponent, ExponentLetter, ExponentPart, Expr, IntLiteralConstant, KindParam,
+    LiteralConstant, PrimaryRaw, RealLiteralConstant, Sign, SignedDigitString,
+    SignedIntLiteralConstant, SignedRealLiteralConstant, Significand, Spanned, UnaryOp,
 };
 use super::Classifier;
 
@@ -107,16 +110,28 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     Some(Spanned::new(expr, start_span.concat(close_span)))
                 }
             }
-            Some(TokenKind::DigitString) => {
-                let int_literal_constant = self.int_literal_constant()?;
+            Some(TokenKind::DigitString) => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
+                (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
+                    let char_literal_constant = self.char_literal_constant()?;
 
-                Some(Spanned::new(
-                    Expr::Primary(PrimaryRaw::LiteralConstant(
-                        LiteralConstant::IntLiteralConstant(int_literal_constant.val),
-                    )),
-                    int_literal_constant.span,
-                ))
-            }
+                    Some(Spanned::new(
+                        Expr::Primary(PrimaryRaw::LiteralConstant(
+                            LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                        )),
+                        char_literal_constant.span,
+                    ))
+                }
+                _ => {
+                    let int_literal_constant = self.int_literal_constant()?;
+
+                    Some(Spanned::new(
+                        Expr::Primary(PrimaryRaw::LiteralConstant(
+                            LiteralConstant::IntLiteralConstant(int_literal_constant.val),
+                        )),
+                        int_literal_constant.span,
+                    ))
+                }
+            },
             Some(TokenKind::BinaryConstant)
             | Some(TokenKind::OctalConstant)
             | Some(TokenKind::HexConstant) => {
@@ -147,6 +162,32 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     real_literal_constant.span,
                 ))
             }
+            Some(TokenKind::CharLiteralConstant) => {
+                let char_literal_constant = self.char_literal_constant()?;
+
+                Some(Spanned::new(
+                    Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                    )),
+                    char_literal_constant.span,
+                ))
+            }
+            Some(t) if t.is_name() => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
+                // Check for both `_ char-literal-constant` and `char-literal-constant`, since it's
+                // possible the name may end with an underscore, which is legal.
+                (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant))
+                | (Some(TokenKind::CharLiteralConstant), _) => {
+                    let char_literal_constant = self.char_literal_constant()?;
+
+                    Some(Spanned::new(
+                        Expr::Primary(PrimaryRaw::LiteralConstant(
+                            LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                        )),
+                        char_literal_constant.span,
+                    ))
+                }
+                _ => unimplemented!(),
+            },
             _ => unimplemented!(),
         };
 
@@ -185,6 +226,74 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
             _ => {
                 self.emit_expected_token(&[TokenKind::Name, TokenKind::DigitString]);
+                None
+            }
+        }
+    }
+
+    fn reverse_kind_param(&mut self) -> Option<Spanned<KindParam<'arena>>> {
+        let (start_span, kind_param) = match self.peek_kind() {
+            Some(t) if t.is_name() => {
+                let t = self.bump().unwrap();
+
+                let (last_char_index, last_char) =
+                    ContinuationStr::new(&self.text[t.span.start as usize..t.span.end as usize])
+                        .char_indices()
+                        .last()
+                        .unwrap();
+
+                if last_char == '_' {
+                    // Handle the case of t being a name with a trailing underscore.
+                    let token = Token {
+                        kind: TokenKind::Name,
+                        span: Span {
+                            file_id: self.file_id,
+                            start: t.span.start,
+                            end: t.span.start + last_char_index as u32,
+                        },
+                    };
+
+                    // Early return - rest of function attempts to parse an underscore token
+                    return Some(Spanned::new(
+                        KindParam::ScalarIntConstantName(
+                            token
+                                .try_intern_contents(&mut self.interner, &self.text)
+                                .unwrap(),
+                        ),
+                        t.span,
+                    ));
+                } else {
+                    (
+                        t.span,
+                        KindParam::ScalarIntConstantName(
+                            t.try_intern_contents(&mut self.interner, &self.text)
+                                .unwrap(),
+                        ),
+                    )
+                }
+            }
+            Some(TokenKind::DigitString) => {
+                let t = self.bump().unwrap();
+                (
+                    t.span,
+                    KindParam::DigitString(
+                        t.try_into_uint(&self.text, &self.arena.big_uints).unwrap(),
+                    ),
+                )
+            }
+            _ => {
+                self.emit_expected_token(&[TokenKind::Name, TokenKind::DigitString]);
+                return None;
+            }
+        };
+
+        match self.peek_kind() {
+            Some(TokenKind::Underscore) => Some(Spanned::new(
+                kind_param,
+                start_span.concat(self.bump().unwrap().span),
+            )),
+            _ => {
+                self.emit_expected_token(&[TokenKind::Underscore]);
                 None
             }
         }
@@ -536,5 +645,68 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 s.span.concat(real_literal_constant.span)
             }),
         ))
+    }
+
+    fn char_literal_constant(&mut self) -> Option<Spanned<CharLiteralConstant<'arena>>> {
+        let kind_param = match (
+            self.peek_nth_kind(0),
+            self.peek_nth_kind(1),
+            self.peek_nth_kind(2),
+        ) {
+            (
+                Some(TokenKind::DigitString),
+                Some(TokenKind::Underscore),
+                Some(TokenKind::CharLiteralConstant),
+            ) => Some(self.reverse_kind_param()?),
+            (Some(t), Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant))
+                if t.is_name() =>
+            {
+                Some(self.reverse_kind_param()?)
+            }
+            (Some(t), Some(TokenKind::CharLiteralConstant), _) if t.is_name() => {
+                Some(self.reverse_kind_param()?)
+            }
+            _ => None,
+        };
+
+        match self.peek_kind() {
+            Some(TokenKind::CharLiteralConstant) => {
+                let t = self.bump().unwrap();
+
+                let quote_char = self.text[t.span.start as usize..].chars().next().unwrap();
+
+                let cont_str = ContinuationStr::new(
+                    &self.text[t.span.start as usize + 1..t.span.end as usize - 1],
+                );
+
+                let mut saw_quote = false;
+                let iter = cont_str.chars().filter(|c| {
+                    if *c == quote_char {
+                        if saw_quote {
+                            saw_quote = false;
+                            false
+                        } else {
+                            saw_quote = true;
+                            true
+                        }
+                    } else {
+                        true
+                    }
+                });
+
+                Some(Spanned::new(
+                    CharLiteralConstant {
+                        kind_param: kind_param.map(|k| k.val),
+                        string: self.arena.string_literals.alloc(String::from_iter(iter)),
+                    },
+                    kind_param.map_or(t.span, |k| k.span.concat(t.span)),
+                ))
+            }
+            _ => {
+                self.emit_expected_token(&[TokenKind::CharLiteralConstant]);
+
+                None
+            }
+        }
     }
 }

@@ -49,6 +49,7 @@ pub struct ClassifierArena<'arena> {
     letter_specs: Arena<LetterSpec>,
     expressions: Arena<Expr<'arena>>,
     big_uints: Arena<BigUint>,
+    string_literals: Arena<String>,
 }
 
 impl<'arena> ClassifierArena<'arena> {
