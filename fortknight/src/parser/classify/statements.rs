@@ -254,7 +254,7 @@ pub struct CharLiteralConstant<'a> {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct LogicalLiteralConstant<'a> {
     pub value: bool,
-    pub kind: Option<KindParam<'a>>,
+    pub kind_param: Option<KindParam<'a>>,
 }
 
 /// R754: derived-type-spec is type-name [ ( type-param-spec-list ) ]

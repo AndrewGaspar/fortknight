@@ -12,8 +12,9 @@ use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 use super::statements::{
     BozLiteralConstant, CharLiteralConstant, ComplexLiteralConstant, ComplexLiteralPart,
     DigitString, Exponent, ExponentLetter, ExponentPart, Expr, IntLiteralConstant, KindParam,
-    LiteralConstant, PrimaryRaw, RealLiteralConstant, Sign, SignedDigitString,
-    SignedIntLiteralConstant, SignedRealLiteralConstant, Significand, Spanned, UnaryOp,
+    LiteralConstant, LogicalLiteralConstant, PrimaryRaw, RealLiteralConstant, Sign,
+    SignedDigitString, SignedIntLiteralConstant, SignedRealLiteralConstant, Significand, Spanned,
+    UnaryOp,
 };
 use super::Classifier;
 
@@ -170,6 +171,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         LiteralConstant::CharLiteralConstant(char_literal_constant.val),
                     )),
                     char_literal_constant.span,
+                ))
+            }
+            Some(TokenKind::True) | Some(TokenKind::False) => {
+                let logical_literal_constant = self.logical_literal_constant()?;
+
+                Some(Spanned::new(
+                    Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::LogicalLiteralConstant(logical_literal_constant.val),
+                    )),
+                    logical_literal_constant.span,
                 ))
             }
             Some(t) if t.is_name() => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
@@ -647,6 +658,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         ))
     }
 
+    /// R724: char-literal-constant
     fn char_literal_constant(&mut self) -> Option<Spanned<CharLiteralConstant<'arena>>> {
         let kind_param = match (
             self.peek_nth_kind(0),
@@ -708,5 +720,30 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 None
             }
         }
+    }
+
+    /// R725: logical-literal-constant
+    fn logical_literal_constant(&mut self) -> Option<Spanned<LogicalLiteralConstant<'arena>>> {
+        let (value, start_span) = match self.peek_kind() {
+            Some(TokenKind::True) => (true, self.bump().unwrap().span),
+            Some(TokenKind::False) => (false, self.bump().unwrap().span),
+            _ => {
+                self.emit_expected_token(&[TokenKind::True, TokenKind::False]);
+                return None;
+            }
+        };
+
+        let kind_param = match self.peek_kind() {
+            Some(TokenKind::Underscore) => Some(self.kind_param()?),
+            _ => None,
+        };
+
+        Some(Spanned::new(
+            LogicalLiteralConstant {
+                value,
+                kind_param: kind_param.map(|k| k.val),
+            },
+            kind_param.map_or(start_span, |k| start_span.concat(k.span)),
+        ))
     }
 }

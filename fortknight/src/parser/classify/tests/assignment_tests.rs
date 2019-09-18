@@ -5,8 +5,8 @@ use crate::intern::StringInterner;
 use crate::num::Uint;
 use crate::parser::classify::statements::{
     AssignmentStmt, CharLiteralConstant, Designator, DigitString, Exponent, ExponentLetter,
-    ExponentPart, Expr, IntLiteralConstant, KindParam, LiteralConstant, PrimaryRaw,
-    RealLiteralConstant, Sign, SignedDigitString, Significand, Spanned, Variable,
+    ExponentPart, Expr, IntLiteralConstant, KindParam, LiteralConstant, LogicalLiteralConstant,
+    PrimaryRaw, RealLiteralConstant, Sign, SignedDigitString, Significand, Spanned, Variable,
 };
 use crate::parser::classify::{ClassifierArena, StmtKind};
 use std::cell::RefCell;
@@ -93,6 +93,75 @@ fn assignment() {
                     }
                 })
             ],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = .true.", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::LogicalLiteralConstant(LogicalLiteralConstant {
+                            value: true,
+                            kind_param: None
+                        })
+                    )),
+                    span: test_span(6, 12)
+                }
+            })],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = .false.", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::LogicalLiteralConstant(LogicalLiteralConstant {
+                            value: false,
+                            kind_param: None
+                        })
+                    )),
+                    span: test_span(6, 13)
+                }
+            })],
+            get_stmts(&mut c)
+        );
+    }
+
+    {
+        let mut c = classifier("foo = .true._bar", &sink, &mut interner, &arena);
+
+        assert_eq!(
+            vec![Assignment(AssignmentStmt {
+                variable: Spanned {
+                    val: Variable::DesignatorOrFunctionReference(Designator::ObjectName(foo)),
+                    span: test_span(0, 3)
+                },
+                expr: Spanned {
+                    val: &Expr::Primary(PrimaryRaw::LiteralConstant(
+                        LiteralConstant::LogicalLiteralConstant(LogicalLiteralConstant {
+                            value: true,
+                            kind_param: Some(KindParam::ScalarIntConstantName(bar))
+                        })
+                    )),
+                    span: test_span(6, 16)
+                }
+            })],
             get_stmts(&mut c)
         );
     }
