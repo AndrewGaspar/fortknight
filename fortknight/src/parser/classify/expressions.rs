@@ -57,10 +57,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             ));
         }
 
-        let first_part = match self.peek_kind() {
+        match self.peek_kind() {
             Some(TokenKind::LeftParen) => {
-                let start_span = self.bump().unwrap().span;
-
                 let parse_complex_literal_constant = match self.check_complex_literal_part(1) {
                     Some(next_idx) => match self.peek_nth_kind(next_idx) {
                         Some(TokenKind::Comma) => true,
@@ -69,34 +67,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     _ => false,
                 };
 
-                if parse_complex_literal_constant {
-                    let real_part = self.complex_literal_part()?.val;
-                    assert_eq!(
-                        TokenKind::Comma,
-                        self.bump().unwrap().kind,
-                        "Internal compiler error: We should not have tried to parse this \
-                         complex-literal-constant unless there's a comma here."
-                    );
-                    let imag_part = self.complex_literal_part()?.val;
+                if !parse_complex_literal_constant {
+                    let start_span = self.bump().unwrap().span;
 
-                    let end_span = match self.peek_kind() {
-                        Some(TokenKind::RightParen) => self.bump().unwrap().span,
-                        _ => {
-                            self.emit_expected_token(&[TokenKind::RightParen]);
-                            return None;
-                        }
-                    };
-
-                    Some(Spanned::new(
-                        Expr::Primary(PrimaryRaw::LiteralConstant(
-                            LiteralConstant::ComplexLiteralConstant(ComplexLiteralConstant {
-                                real_part,
-                                imag_part,
-                            }),
-                        )),
-                        start_span.concat(end_span),
-                    ))
-                } else {
                     let expr = self.expr()?.val;
 
                     let close_span = match self.peek_kind() {
@@ -108,16 +81,56 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                     };
 
-                    Some(Spanned::new(expr, start_span.concat(close_span)))
+                    return Some(Spanned::new(expr, start_span.concat(close_span)));
                 }
+            }
+            _ => {}
+        };
+
+        let primary = self.primary()?;
+
+        Some(Spanned::new(Expr::Primary(primary.val), primary.span))
+    }
+
+    pub(super) fn primary(&mut self) -> Option<Spanned<PrimaryRaw<'arena>>> {
+        match self.peek_kind() {
+            Some(TokenKind::LeftParen) => {
+                let start_span = self.bump().unwrap().span;
+
+                let real_part = self.complex_literal_part()?.val;
+                assert_eq!(
+                    TokenKind::Comma,
+                    self.bump().unwrap().kind,
+                    "Internal compiler error: We should not have tried to parse this \
+                     complex-literal-constant unless there's a comma here."
+                );
+                let imag_part = self.complex_literal_part()?.val;
+
+                let end_span = match self.peek_kind() {
+                    Some(TokenKind::RightParen) => self.bump().unwrap().span,
+                    _ => {
+                        self.emit_expected_token(&[TokenKind::RightParen]);
+                        return None;
+                    }
+                };
+
+                Some(Spanned::new(
+                    PrimaryRaw::LiteralConstant(LiteralConstant::ComplexLiteralConstant(
+                        ComplexLiteralConstant {
+                            real_part,
+                            imag_part,
+                        },
+                    )),
+                    start_span.concat(end_span),
+                ))
             }
             Some(TokenKind::DigitString) => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
                 (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
                     let char_literal_constant = self.char_literal_constant()?;
 
                     Some(Spanned::new(
-                        Expr::Primary(PrimaryRaw::LiteralConstant(
-                            LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                        PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
+                            char_literal_constant.val,
                         )),
                         char_literal_constant.span,
                     ))
@@ -126,8 +139,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     let int_literal_constant = self.int_literal_constant()?;
 
                     Some(Spanned::new(
-                        Expr::Primary(PrimaryRaw::LiteralConstant(
-                            LiteralConstant::IntLiteralConstant(int_literal_constant.val),
+                        PrimaryRaw::LiteralConstant(LiteralConstant::IntLiteralConstant(
+                            int_literal_constant.val,
                         )),
                         int_literal_constant.span,
                     ))
@@ -147,9 +160,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 };
 
                 Some(Spanned::new(
-                    Expr::Primary(PrimaryRaw::LiteralConstant(
-                        LiteralConstant::BozLiteralConstant(boz_constant),
-                    )),
+                    PrimaryRaw::LiteralConstant(LiteralConstant::BozLiteralConstant(boz_constant)),
                     t.span,
                 ))
             }
@@ -157,8 +168,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 let real_literal_constant = self.real_literal_constant()?;
 
                 Some(Spanned::new(
-                    Expr::Primary(PrimaryRaw::LiteralConstant(
-                        LiteralConstant::RealLiteralConstant(real_literal_constant.val),
+                    PrimaryRaw::LiteralConstant(LiteralConstant::RealLiteralConstant(
+                        real_literal_constant.val,
                     )),
                     real_literal_constant.span,
                 ))
@@ -167,8 +178,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 let char_literal_constant = self.char_literal_constant()?;
 
                 Some(Spanned::new(
-                    Expr::Primary(PrimaryRaw::LiteralConstant(
-                        LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                    PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
+                        char_literal_constant.val,
                     )),
                     char_literal_constant.span,
                 ))
@@ -177,8 +188,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 let logical_literal_constant = self.logical_literal_constant()?;
 
                 Some(Spanned::new(
-                    Expr::Primary(PrimaryRaw::LiteralConstant(
-                        LiteralConstant::LogicalLiteralConstant(logical_literal_constant.val),
+                    PrimaryRaw::LiteralConstant(LiteralConstant::LogicalLiteralConstant(
+                        logical_literal_constant.val,
                     )),
                     logical_literal_constant.span,
                 ))
@@ -191,8 +202,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     let char_literal_constant = self.char_literal_constant()?;
 
                     Some(Spanned::new(
-                        Expr::Primary(PrimaryRaw::LiteralConstant(
-                            LiteralConstant::CharLiteralConstant(char_literal_constant.val),
+                        PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
+                            char_literal_constant.val,
                         )),
                         char_literal_constant.span,
                     ))
@@ -200,9 +211,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 _ => unimplemented!(),
             },
             _ => unimplemented!(),
-        };
-
-        first_part
+        }
     }
 
     /// Parses a KindParam, starting with the `_`.
