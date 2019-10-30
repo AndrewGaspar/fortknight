@@ -4,15 +4,13 @@ use std::cell::RefCell;
 use std::iter::Iterator;
 use std::str::CharIndices;
 
-use peek_nth::{IteratorExt, PeekableNth};
-
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode};
 use crate::index::FileId;
 use crate::span::Span;
 
 use super::TokenizerOptions;
 
-#[derive(PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 enum InCComment {
     No,
     InOpening,
@@ -24,11 +22,12 @@ enum InCComment {
 /// to lex tokens. It does this by:
 /// - resolving continuations
 /// - mapping down newlines to LF
+#[derive(Clone)]
 pub struct LowLevelLexer<'input> {
-    file_id: FileId,
-    text: &'input str,
-    diagnostics: &'input RefCell<DiagnosticSink>,
-    chars: PeekableNth<CharIndices<'input>>,
+    pub(crate) file_id: FileId,
+    pub(crate) text: &'input str,
+    pub(crate) diagnostics: &'input RefCell<DiagnosticSink>,
+    chars: CharIndices<'input>,
     tokenize_preprocessor: bool,
     fresh_new_line: bool,
     opening_quote: Option<char>,
@@ -51,7 +50,7 @@ impl<'input> LowLevelLexer<'input> {
             file_id,
             text,
             diagnostics,
-            chars: text.char_indices().peekable_nth(),
+            chars: text.char_indices(),
             tokenize_preprocessor: options.tokenize_preprocessor,
             fresh_new_line: true,
             opening_quote: None,
@@ -84,29 +83,32 @@ impl<'input> LowLevelLexer<'input> {
         self.text.len() as u32
     }
 
-    fn peek_nth(&mut self, n: usize) -> Option<(u32, char)> {
-        self.chars.peek_nth(n).map(|(i, c)| (*i as u32, *c))
-    }
-
-    fn peek(&mut self) -> Option<(u32, char)> {
-        self.peek_nth(0)
-    }
-
     fn bump(&mut self) -> Option<(u32, char)> {
         self.chars.next().map(|(i, c)| (i as u32, c))
     }
 
-    fn bump_nth(&mut self, n: usize) -> Option<(u32, char)> {
-        self.chars.nth(n).map(|(i, c)| (i as u32, c))
+    fn bump_nth(&mut self, n: u32) -> Option<(u32, char)> {
+        self.chars.nth(n as usize).map(|(i, c)| (i as u32, c))
+    }
+
+    fn peek_char(&mut self) -> Option<(u32, char)> {
+        self.peek_nth_char(0)
+    }
+
+    fn peek_nth_char(&mut self, n: u32) -> Option<(u32, char)> {
+        self.chars
+            .clone()
+            .nth(n as usize)
+            .map(|(i, c)| (i as u32, c))
     }
 
     // call when you want to look past a new-line token.
-    fn peek_past_new_line(&mut self, start: usize) -> usize {
-        match self.peek_nth(start) {
-            Some((_, '\n')) => start + 1,
+    fn peek_past_new_line(&mut self, chars: &mut CharIndices<'input>) -> u32 {
+        match chars.next().map(|(i, c)| (i as u32, c)) {
+            Some((_, '\n')) => 1,
             Some((idx0, '\r')) => {
-                match self.peek_nth(start + 1) {
-                    Some((_, '\n')) => start + 2,
+                match chars.next() {
+                    Some((_, '\n')) => 2,
                     // CR is not a supported line ending
                     _ => {
                         self.emit_error(
@@ -116,11 +118,11 @@ impl<'input> LowLevelLexer<'input> {
                             "CR is not a valid line ending. Only CRLF and LF are supported.",
                         );
                         // But still act like it is so we can at least progress.
-                        start + 1
+                        1
                     }
                 }
             }
-            _ => panic!("Internal compiler error: self.peek() must match a new line start"),
+            _ => panic!("Internal compiler error: self.peek_char() must match a new line start"),
         }
     }
 
@@ -129,7 +131,7 @@ impl<'input> LowLevelLexer<'input> {
         match self.bump() {
             x @ Some((_, '\n')) => x,
             Some((idx0, '\r')) => {
-                match self.peek() {
+                match self.peek_char() {
                     Some((_, '\n')) => {
                         self.bump();
                         Some((idx0, '\n'))
@@ -147,19 +149,18 @@ impl<'input> LowLevelLexer<'input> {
                     }
                 }
             }
-            _ => panic!("Internal compiler error: self.peek() must match a new line start"),
+            _ => panic!("Internal compiler error: self.peek_char() must match a new line start"),
         }
     }
 
     /// Called upon seeing a '!' but not wanting to consume it yet. Returns the next position after
     /// the newline closing the commentary
-    fn peek_past_commentary(&mut self, start_at: usize) -> usize {
-        let mut advance = start_at;
+    fn peek_past_commentary(&mut self, chars: &mut CharIndices<'input>) -> u32 {
         loop {
-            match self.peek_nth(advance) {
-                Some((_, '\r')) | Some((_, '\n')) | None => break self.peek_past_new_line(advance),
+            match chars.clone().next() {
+                Some((_, '\r')) | Some((_, '\n')) | None => break self.peek_past_new_line(chars),
                 _ => {
-                    advance += 1;
+                    chars.next();
                     continue;
                 }
             }
@@ -169,7 +170,7 @@ impl<'input> LowLevelLexer<'input> {
     /// Called upon seeing a '!'
     fn skip_commentary(&mut self) {
         loop {
-            match self.peek() {
+            match self.peek_char() {
                 Some((_, '\r')) | Some((_, '\n')) | None => break,
                 _ => {
                     self.bump();
@@ -183,7 +184,7 @@ impl<'input> LowLevelLexer<'input> {
     fn resolve_continuation(&mut self, idx0: u32) -> Option<(u32, char)> {
         // Resolve first line
         loop {
-            match self.peek() {
+            match self.peek_char() {
                 // Commentary is ignored inside a string literal - exclamation points are
                 // significant
                 Some((_, '!')) if self.opening_quote.is_none() => {
@@ -226,12 +227,14 @@ impl<'input> LowLevelLexer<'input> {
 
         // We need to lookahead to see what we're dealing with before consuming any of the
         // characters
-        let mut advance_by = 0;
+        // TODO: All this peeking is bad, especially now that peeking is stateless. Create a
+        // separate state machine for resolving continuations.
+        let mut chars = self.chars.clone();
         let mut first_seen_whitepace = None;
         loop {
-            match self.peek_nth(advance_by) {
+            match chars.clone().next().map(|(i, c)| (i as u32, c)) {
                 Some((_, '!')) if self.opening_quote.is_none() => {
-                    advance_by = self.peek_past_commentary(advance_by);
+                    self.peek_past_commentary(&mut chars);
                     // this was a commentary line, so forget the whitespace we saw
                     first_seen_whitepace = None;
                 }
@@ -239,9 +242,9 @@ impl<'input> LowLevelLexer<'input> {
                     // Whitespace only later becomes significant if it turns out we're not in a
                     // token continuation
                     if first_seen_whitepace.is_none() {
-                        first_seen_whitepace = Some(advance_by);
+                        first_seen_whitepace = Some(chars.clone());
                     }
-                    advance_by += 1;
+                    chars.next();
                 }
                 Some((_, '\r')) | Some((_, '\n')) | None => {
                     // skip all the characters we've advanced past and go back to letting the main
@@ -249,9 +252,7 @@ impl<'input> LowLevelLexer<'input> {
 
                     // We don't want to consume the newline, so we merely consume up to the
                     // previous character
-                    if advance_by > 0 {
-                        self.bump_nth(advance_by - 1);
-                    }
+                    self.chars = chars;
 
                     return None;
                 }
@@ -259,30 +260,31 @@ impl<'input> LowLevelLexer<'input> {
                     // We're in a token continuation - check to see if the continuation is lonely,
                     // then advance through the continuation end
 
-                    let mut advance_past = advance_by + 1;
+                    // consume through the ampersand
+                    chars.next().unwrap();
 
-                    loop {
-                        match self.peek_nth(advance_past) {
-                            Some((_, c)) if c.is_whitespace() => {}
-                            Some((_, '\r')) | Some((_, '\n')) | None => {
-                                self.emit_error(
+                    {
+                        let mut chars = chars.clone();
+                        loop {
+                            match chars.next() {
+                                Some((_, c)) if c.is_whitespace() => {}
+                                Some((_, '\r')) | Some((_, '\n')) | None => {
+                                    self.emit_error(
                                     ParserErrorCode::LonelyContinuation,
                                     idx,
                                     idx + 1,
                                     "A line continuation may not appear as the only token on a line",
                                 );
-                                break;
-                            }
-                            Some(_) => {
-                                break;
-                            }
-                        };
-
-                        advance_past += 1;
+                                    break;
+                                }
+                                Some(_) => {
+                                    break;
+                                }
+                            };
+                        }
                     }
 
-                    // consume through the ampersand
-                    self.bump_nth(advance_by);
+                    self.chars = chars;
 
                     return None;
                 }
@@ -299,8 +301,14 @@ impl<'input> LowLevelLexer<'input> {
                         );
 
                         return match first_seen_whitepace {
-                            Some(x) => self.bump_nth(x),
-                            None => self.bump_nth(advance_by),
+                            Some(chars) => {
+                                self.chars = chars;
+                                self.bump()
+                            }
+                            None => {
+                                self.chars = chars;
+                                self.bump()
+                            }
                         };
                     }
 
@@ -310,7 +318,10 @@ impl<'input> LowLevelLexer<'input> {
                     // seen whitespace on the line if there is one, otherwise we emit a space as if
                     // it was in the current column.
                     return match first_seen_whitepace {
-                        Some(x) => self.bump_nth(x),
+                        Some(chars) => {
+                            self.chars = chars;
+                            self.bump()
+                        }
                         None => Some((idx, ' ')),
                     };
                 }
@@ -321,13 +332,15 @@ impl<'input> LowLevelLexer<'input> {
     /// Only called when we're tokenizing the preprocessor, and we've detected that we're in a c
     /// block comment. Consider this a separate "mode".
     fn in_c_comment_next(&mut self) -> Option<(u32, char)> {
-        match self.peek() {
+        let mut chars = self.chars.clone();
+
+        match chars.next() {
             Some((_, '*')) if self.in_c_comment == InCComment::InOpening => {
                 self.in_c_comment = InCComment::Yes;
                 self.bump()
             }
             Some((_, '*')) if self.in_c_comment == InCComment::Yes => {
-                if let Some((_, '/')) = self.peek_nth(1) {
+                if let Some((_, '/')) = chars.next() {
                     self.in_c_comment = InCComment::InClosing;
                 }
                 self.bump()
@@ -339,18 +352,15 @@ impl<'input> LowLevelLexer<'input> {
             _ => self.bump(),
         }
     }
-}
 
-impl<'input> Iterator for LowLevelLexer<'input> {
-    type Item = (u32, char);
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn char_next(&mut self) -> Option<(u32, char)> {
         if self.in_c_comment != InCComment::No {
             return self.in_c_comment_next();
         }
 
         loop {
-            return match self.peek() {
+            let mut chars = self.chars.clone();
+            return match chars.next().map(|(i, c)| (i as u32, c)) {
                 // '&' is significant in a C Block Comment
                 Some((idx0, '&')) => {
                     if self.fresh_new_line {
@@ -383,7 +393,7 @@ impl<'input> Iterator for LowLevelLexer<'input> {
                 Some((_, '/'))
                     if self.tokenize_preprocessor && self.in_c_comment == InCComment::No =>
                 {
-                    if let Some((_, '*')) = self.peek_nth(1) {
+                    if let Some((_, '*')) = chars.next() {
                         self.in_c_comment = InCComment::InOpening;
                     };
                     self.bump()
@@ -394,5 +404,13 @@ impl<'input> Iterator for LowLevelLexer<'input> {
                 }
             };
         }
+    }
+}
+
+impl<'input> Iterator for LowLevelLexer<'input> {
+    type Item = (u32, char);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.char_next()
     }
 }
