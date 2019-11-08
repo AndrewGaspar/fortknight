@@ -8,8 +8,8 @@ use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode};
 use crate::index::FileId;
 use crate::span::Span;
 
-use super::TokenizerOptions;
-
+#[cfg(test)]
+mod tests;
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum InCComment {
     No,
@@ -37,7 +37,7 @@ pub struct FortranPreprocessor<'input> {
 
 impl<'input> FortranPreprocessor<'input> {
     pub fn new(
-        options: &TokenizerOptions,
+        tokenize_preprocessor: bool,
         file_id: FileId,
         text: &'input str,
         diagnostics: &'input RefCell<DiagnosticSink>,
@@ -52,7 +52,7 @@ impl<'input> FortranPreprocessor<'input> {
             text,
             diagnostics,
             chars: text.char_indices(),
-            tokenize_preprocessor: options.tokenize_preprocessor,
+            tokenize_preprocessor,
             fresh_new_line: true,
             opening_quote: None,
             in_c_comment: InCComment::No,

@@ -5,6 +5,8 @@ use num_traits::FromPrimitive;
 
 use self::TakeUntil::*;
 
+use super::preprocessor::FortranPreprocessor;
+
 use crate::error::{
     AnalysisErrorKind, DiagnosticSink,
     ParserErrorCode::{self, *},
@@ -16,13 +18,10 @@ use crate::string::{CaseInsensitiveContinuationStr, ContinuationStr};
 #[cfg(test)]
 mod tests;
 
-mod low_level;
 mod token;
 
 use token::*;
 pub use token::{KeywordTokenKind, Letter, Token, TokenKind};
-
-use low_level::FortranPreprocessor;
 
 #[derive(Clone, Copy, Default)]
 pub struct TokenizerOptions {
@@ -62,7 +61,12 @@ impl<'input> Tokenizer<'input> {
         );
 
         Tokenizer {
-            chars: FortranPreprocessor::new(options, file_id, text, diagnostics),
+            chars: FortranPreprocessor::new(
+                options.tokenize_preprocessor,
+                file_id,
+                text,
+                diagnostics,
+            ),
             tokenize_preprocessor: options.tokenize_preprocessor,
             mode: LexMode::Normal,
         }
