@@ -153,3 +153,83 @@ impl<'input> Display for CaseInsensitiveContinuationStr<'input> {
         Ok(())
     }
 }
+
+pub struct ContinuationStrIgnoreWhiteSpace<'input>(ContinuationStr<'input>);
+
+impl<'input> ContinuationStrIgnoreWhiteSpace<'input> {
+    pub fn new(string: &'input str) -> ContinuationStrIgnoreWhiteSpace {
+        ContinuationStrIgnoreWhiteSpace(ContinuationStr::new(string))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = char> + 'input {
+        self.chars()
+    }
+
+    pub fn chars(&self) -> impl Iterator<Item = char> + 'input {
+        self.0.iter().filter(|c| !c.is_whitespace())
+    }
+
+    pub fn char_indices(&self) -> impl Iterator<Item = (usize, char)> + 'input {
+        self.0.char_indices().filter(|(_, c)| !c.is_whitespace())
+    }
+}
+
+impl<'input> PartialEq for ContinuationStrIgnoreWhiteSpace<'input> {
+    fn eq(&self, other: &ContinuationStrIgnoreWhiteSpace) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<'input> Eq for ContinuationStrIgnoreWhiteSpace<'input> {}
+
+impl<'input> Display for ContinuationStrIgnoreWhiteSpace<'input> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        for c in self.iter() {
+            f.write_char(c)?;
+        }
+
+        Ok(())
+    }
+}
+
+pub struct CaseInsensitiveContinuationStrIgnoreWhiteSpace<'input>(
+    ContinuationStrIgnoreWhiteSpace<'input>,
+);
+
+impl<'input> CaseInsensitiveContinuationStrIgnoreWhiteSpace<'input> {
+    pub fn new(string: &'input str) -> CaseInsensitiveContinuationStrIgnoreWhiteSpace {
+        CaseInsensitiveContinuationStrIgnoreWhiteSpace(ContinuationStrIgnoreWhiteSpace::new(string))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = char> + 'input {
+        self.chars()
+    }
+
+    pub fn chars(&self) -> impl Iterator<Item = char> + 'input {
+        self.0.iter().map(|c| c.to_ascii_lowercase())
+    }
+
+    pub fn char_indices(&self) -> impl Iterator<Item = (usize, char)> + 'input {
+        self.0
+            .char_indices()
+            .map(|(i, c)| (i, c.to_ascii_lowercase()))
+    }
+}
+
+impl<'input> PartialEq for CaseInsensitiveContinuationStrIgnoreWhiteSpace<'input> {
+    fn eq(&self, other: &CaseInsensitiveContinuationStrIgnoreWhiteSpace) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<'input> Eq for CaseInsensitiveContinuationStrIgnoreWhiteSpace<'input> {}
+
+impl<'input> Display for CaseInsensitiveContinuationStrIgnoreWhiteSpace<'input> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        for c in self.iter() {
+            f.write_char(c)?;
+        }
+
+        Ok(())
+    }
+}
