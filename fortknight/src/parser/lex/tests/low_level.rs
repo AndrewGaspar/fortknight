@@ -15,6 +15,15 @@ fn ll_lex(text: &str) -> String {
         .collect()
 }
 
+fn ll_lex_iw(text: &str) -> String {
+    let sink = RefCell::new(DiagnosticSink::Raw(Box::new(std::io::sink())));
+    let mut lex = LowLevelLexer::new(&TokenizerOptions::default(), FileId(0), text, &sink);
+
+    lex.insignificant_whitespace(true);
+
+    lex.map(|(_, c)| c).collect()
+}
+
 #[test]
 fn basic() {
     assert_eq!("howdyall", ll_lex("howdy&\n&all"));
@@ -51,4 +60,10 @@ fn rock_star() {
         & go play!'"
         )
     );
+}
+
+#[test]
+fn insignificant_whitespace() {
+    assert_eq!("w o m b o", ll_lex("w o m b o"));
+    assert_eq!("wombo", ll_lex_iw("w o m b o"));
 }

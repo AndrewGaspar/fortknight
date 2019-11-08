@@ -32,6 +32,7 @@ pub struct LowLevelLexer<'input> {
     fresh_new_line: bool,
     opening_quote: Option<char>,
     in_c_comment: InCComment,
+    insignificant_whitespace: bool,
 }
 
 impl<'input> LowLevelLexer<'input> {
@@ -55,7 +56,12 @@ impl<'input> LowLevelLexer<'input> {
             fresh_new_line: true,
             opening_quote: None,
             in_c_comment: InCComment::No,
+            insignificant_whitespace: false,
         }
+    }
+
+    pub fn insignificant_whitespace(&mut self, b: bool) {
+        self.insignificant_whitespace = b;
     }
 
     fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
@@ -227,8 +233,6 @@ impl<'input> LowLevelLexer<'input> {
 
         // We need to lookahead to see what we're dealing with before consuming any of the
         // characters
-        // TODO: All this peeking is bad, especially now that peeking is stateless. Create a
-        // separate state machine for resolving continuations.
         let mut chars = self.chars.clone();
         let mut first_seen_whitepace = None;
         loop {
@@ -237,14 +241,6 @@ impl<'input> LowLevelLexer<'input> {
                     self.peek_past_commentary(&mut chars);
                     // this was a commentary line, so forget the whitespace we saw
                     first_seen_whitepace = None;
-                }
-                Some((_, c)) if c.is_whitespace() => {
-                    // Whitespace only later becomes significant if it turns out we're not in a
-                    // token continuation
-                    if first_seen_whitepace.is_none() {
-                        first_seen_whitepace = Some(chars.clone());
-                    }
-                    chars.next();
                 }
                 Some((_, '\r')) | Some((_, '\n')) | None => {
                     // skip all the characters we've advanced past and go back to letting the main
@@ -255,6 +251,14 @@ impl<'input> LowLevelLexer<'input> {
                     self.chars = chars;
 
                     return None;
+                }
+                Some((_, c)) if c.is_whitespace() => {
+                    // Whitespace only later becomes significant if it turns out we're not in a
+                    // token continuation
+                    if first_seen_whitepace.is_none() {
+                        first_seen_whitepace = Some(chars.clone());
+                    }
+                    chars.next();
                 }
                 Some((idx, '&')) => {
                     // We're in a token continuation - check to see if the continuation is lonely,
@@ -267,7 +271,6 @@ impl<'input> LowLevelLexer<'input> {
                         let mut chars = chars.clone();
                         loop {
                             match chars.next() {
-                                Some((_, c)) if c.is_whitespace() => {}
                                 Some((_, '\r')) | Some((_, '\n')) | None => {
                                     self.emit_error(
                                     ParserErrorCode::LonelyContinuation,
@@ -277,6 +280,7 @@ impl<'input> LowLevelLexer<'input> {
                                 );
                                     break;
                                 }
+                                Some((_, c)) if c.is_whitespace() => {}
                                 Some(_) => {
                                     break;
                                 }
@@ -397,6 +401,10 @@ impl<'input> LowLevelLexer<'input> {
                         self.in_c_comment = InCComment::InOpening;
                     };
                     self.bump()
+                }
+                Some((_, c)) if self.insignificant_whitespace && c.is_whitespace() => {
+                    self.bump();
+                    continue;
                 }
                 _ => {
                     self.fresh_new_line = false;

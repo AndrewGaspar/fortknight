@@ -39,6 +39,7 @@ pub enum LexMode {
 pub struct Tokenizer<'input> {
     chars: LowLevelLexer<'input>,
     tokenize_preprocessor: bool,
+    mode: LexMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +64,20 @@ impl<'input> Tokenizer<'input> {
         Tokenizer {
             chars: LowLevelLexer::new(options, file_id, text, diagnostics),
             tokenize_preprocessor: options.tokenize_preprocessor,
+            mode: LexMode::Normal,
+        }
+    }
+
+    /// Lexing behavior changes depending on whether we're in "normal" mode or "format" mode.
+    pub fn set_lex_mode(&mut self, mode: LexMode) {
+        self.mode = mode;
+        match self.mode {
+            LexMode::Format => {
+                self.chars.insignificant_whitespace(true);
+            }
+            LexMode::Normal => {
+                self.chars.insignificant_whitespace(false);
+            }
         }
     }
 

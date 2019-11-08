@@ -19,8 +19,7 @@ fn check_intrinsic_types() {
         assert!(t.is_intrinsic_type());
     }
 
-    let non_intrinsic_types =
-        KeywordTokenKind::all_keywords().filter(|k| !intrinsic_types.contains(k));
+    let non_intrinsic_types = KeywordTokenKind::all().filter(|k| !intrinsic_types.contains(k));
 
     for t in non_intrinsic_types {
         assert!(!t.is_intrinsic_type());
@@ -237,7 +236,7 @@ fn check_intrinsic_routines() {
     }
 
     let non_intrinsic_procedures =
-        KeywordTokenKind::all_keywords().filter(|k| !intrinsic_procedures.contains(k));
+        KeywordTokenKind::all().filter(|k| !intrinsic_procedures.contains(k));
 
     for t in non_intrinsic_procedures {
         assert!(!t.is_intrinsic_procedure(), "Kind: {:?}", t);
