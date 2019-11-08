@@ -22,7 +22,7 @@ mod token;
 use token::*;
 pub use token::{KeywordTokenKind, Letter, Token, TokenKind};
 
-use low_level::LowLevelLexer;
+use low_level::FortranPreprocessor;
 
 #[derive(Clone, Copy, Default)]
 pub struct TokenizerOptions {
@@ -37,7 +37,7 @@ pub enum LexMode {
 }
 
 pub struct Tokenizer<'input> {
-    chars: LowLevelLexer<'input>,
+    chars: FortranPreprocessor<'input>,
     tokenize_preprocessor: bool,
     mode: LexMode,
 }
@@ -62,7 +62,7 @@ impl<'input> Tokenizer<'input> {
         );
 
         Tokenizer {
-            chars: LowLevelLexer::new(options, file_id, text, diagnostics),
+            chars: FortranPreprocessor::new(options, file_id, text, diagnostics),
             tokenize_preprocessor: options.tokenize_preprocessor,
             mode: LexMode::Normal,
         }

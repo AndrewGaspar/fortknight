@@ -23,7 +23,7 @@ enum InCComment {
 /// - resolving continuations
 /// - mapping down newlines to LF
 #[derive(Clone)]
-pub struct LowLevelLexer<'input> {
+pub struct FortranPreprocessor<'input> {
     pub(crate) file_id: FileId,
     pub(crate) text: &'input str,
     pub(crate) diagnostics: &'input RefCell<DiagnosticSink>,
@@ -35,7 +35,7 @@ pub struct LowLevelLexer<'input> {
     insignificant_whitespace: bool,
 }
 
-impl<'input> LowLevelLexer<'input> {
+impl<'input> FortranPreprocessor<'input> {
     pub fn new(
         options: &TokenizerOptions,
         file_id: FileId,
@@ -47,7 +47,7 @@ impl<'input> LowLevelLexer<'input> {
             "Fortknight only supports a maximum of 4GB files."
         );
 
-        LowLevelLexer {
+        FortranPreprocessor {
             file_id,
             text,
             diagnostics,
@@ -415,7 +415,7 @@ impl<'input> LowLevelLexer<'input> {
     }
 }
 
-impl<'input> Iterator for LowLevelLexer<'input> {
+impl<'input> Iterator for FortranPreprocessor<'input> {
     type Item = (u32, char);
 
     fn next(&mut self) -> Option<Self::Item> {
