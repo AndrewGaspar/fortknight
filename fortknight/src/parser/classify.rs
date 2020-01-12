@@ -62,7 +62,8 @@ pub struct Classifier<'input, 'arena> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
-    tokenizer: PeekableNth<Tokenizer<'input>>,
+    tokenizer: Tokenizer<'input>,
+    peeked_tokenizer: Option<PeekableNth<Tokenizer<'input>>>,
     interner: &'input mut crate::intern::StringInterner,
     arena: &'arena ClassifierArena<'arena>,
 }
@@ -80,22 +81,33 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             file_id,
             text,
             diagnostics,
-            tokenizer: Tokenizer::new(options, file_id, text, diagnostics).peekable_nth(),
+            tokenizer: Tokenizer::new(options, file_id, text, diagnostics),
+            peeked_tokenizer: None,
             interner,
             arena,
         }
     }
 
     fn bump(&mut self) -> Option<Token> {
+        self.peeked_tokenizer = None;
+
         self.tokenizer.next()
     }
 
+    fn peeked_tokenizer(&mut self) -> &mut PeekableNth<Tokenizer<'input>> {
+        if self.peeked_tokenizer.is_none() {
+            self.peeked_tokenizer = Some(self.tokenizer.clone().peekable_nth());
+        }
+
+        self.peeked_tokenizer.as_mut().unwrap()
+    }
+
     fn peek(&mut self) -> Option<&Token> {
-        self.tokenizer.peek()
+        self.peeked_tokenizer().peek()
     }
 
     fn peek_nth(&mut self, n: usize) -> Option<&Token> {
-        self.tokenizer.peek_nth(n)
+        self.peeked_tokenizer().peek_nth(n)
     }
 
     fn peek_kind(&mut self) -> Option<TokenKind> {
@@ -153,15 +165,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     where
         MakeEndConstruct: FnOnce(Option<Spanned<InternedName>>) -> StmtKind<'arena>,
     {
-        let (name, end) = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => (
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                )),
-                self.bump().unwrap().span.end,
-            ),
+        let (name, end) = match self.peek() {
+            Some(t) if t.is_name() => {
+                let t = *t;
+                (
+                    Some(Spanned::new(
+                        t.try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                        t.span,
+                    )),
+                    self.bump().unwrap().span.end,
+                )
+            }
             _ => (None, start_span.end),
         };
 
@@ -318,14 +333,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn expect_eos(&mut self) {
-        let start = if let Some(t) = self.tokenizer.peek() {
+        let start = if let Some(t) = self.peek() {
             t.span.start
         } else {
             return;
         };
 
-        match self.tokenizer.peek() {
-            Some(t) if Self::is_eos(&t) => {
+        match self.peek() {
+            Some(t) if Self::is_eos(t) => {
                 self.bump();
                 return;
             }
@@ -342,15 +357,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn program(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let (name, end) = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => (
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                )),
-                self.bump().unwrap().span.end,
-            ),
+        let (name, end) = match self.peek() {
+            Some(t) if t.is_name() => {
+                let t = *t;
+                (
+                    Some(Spanned::new(
+                        t.try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                        t.span,
+                    )),
+                    self.bump().unwrap().span.end,
+                )
+            }
             _ => (None, start_span.end),
         };
 
@@ -409,7 +427,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses from a statement starting with 'module'. Can be a procedure-stmt, module-stmt,
     /// function-stmt, or subroutine-stmt
     fn module(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let (name, end) = match self.tokenizer.peek() {
+        let (name, end) = match self.peek() {
             // Don't consume module keyword for procedures - let the delegated routine parse it.
             Some(Token {
                 kind: TokenKind::Keyword(KeywordTokenKind::Procedure),
@@ -433,14 +451,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(t) if t.is_maybe_routine_prefix() => {
                 return self.subroutine_or_function(start_span);
             }
-            Some(t) if t.is_name() => (
-                Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                ),
-                self.bump().unwrap().span.end,
-            ),
+            Some(t) if t.is_name() => {
+                let t = *t;
+                (
+                    Spanned::new(
+                        t.try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                        t.span,
+                    ),
+                    self.bump().unwrap().span.end,
+                )
+            }
             _ => {
                 return self.expected_token(
                     &[
@@ -587,7 +608,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn end(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let token = match self.tokenizer.peek() {
+        let token = match self.peek() {
             Some(token) => token,
             None => {
                 return Stmt {
@@ -652,7 +673,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {}
         };
 
-        let token = self.tokenizer.next()?;
+        let token = self.bump()?;
 
         let stmt = match token.kind {
             TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),

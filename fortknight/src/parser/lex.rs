@@ -30,11 +30,13 @@ pub struct TokenizerOptions {
 
 /// Used to control how the file is lexed. Can be switched into different modes based on feedback
 /// from higher level parser.
+#[derive(Copy, Clone)]
 pub enum LexMode {
     Normal,
     Format,
 }
 
+#[derive(Clone)]
 pub struct Tokenizer<'input> {
     chars: FortranPreprocessor<'input>,
     tokenize_preprocessor: bool,
