@@ -790,5 +790,16 @@ pub enum StmtKind<'a> {
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Stmt<'a> {
     pub kind: StmtKind<'a>,
+    pub label: Option<Spanned<u32>>,
     pub span: Span,
+}
+
+impl<'a> Stmt<'a> {
+    pub fn new(kind: StmtKind<'a>, span: Span) -> Self {
+        Self {
+            kind,
+            label: None,
+            span,
+        }
+    }
 }

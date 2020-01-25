@@ -8,12 +8,14 @@ use typed_arena::Arena;
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode, SemanticErrorCode};
 use crate::index::FileId;
 use crate::intern::InternedName;
+use crate::num::Uint;
 use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
 use crate::span::Span;
 
 mod assignment;
 mod block;
 mod expressions;
+mod format;
 mod implicit;
 mod import_stmt;
 mod statements;
@@ -182,14 +184,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: make_end_construct(name),
-            span: Span {
+        Stmt::new(
+            make_end_construct(name),
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end,
             },
-        }
+        )
     }
 
     fn emit_expected_token(&mut self, tokens: &[TokenKind]) {
@@ -248,14 +250,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn unclassifiable(&self, idx0: u32, idx1: u32) -> Stmt<'arena> {
-        Stmt {
-            kind: StmtKind::Unclassifiable,
-            span: Span {
+        Stmt::new(
+            StmtKind::Unclassifiable,
+            Span {
                 file_id: self.file_id,
                 start: idx0,
                 end: idx1,
             },
-        }
+        )
     }
 
     fn is_eos(t: &Token) -> bool {
@@ -374,14 +376,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::Program { name },
-            span: Span {
+        Stmt::new(
+            StmtKind::Program { name },
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end,
             },
-        }
+        )
     }
 
     fn end_program(&mut self, start_span: &Span) -> Stmt<'arena> {
@@ -486,14 +488,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::Module { name: name },
-            span: Span {
+        Stmt::new(
+            StmtKind::Module { name: name },
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end,
             },
-        }
+        )
     }
 
     /// Parses a statement starting with `endmodule` or `end module`.
@@ -589,17 +591,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         self.expect_eos();
 
         let span = name.span;
-        Stmt {
-            kind: StmtKind::Submodule {
+        Stmt::new(
+            StmtKind::Submodule {
                 parent_identifier,
                 name,
             },
-            span: Span {
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end: span.end,
             },
-        }
+        )
     }
 
     /// Parses a statement starting with `endsubmodule` or `end submodule`.
@@ -610,12 +612,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn end(&mut self, start_span: &Span) -> Stmt<'arena> {
         let token = match self.peek() {
             Some(token) => token,
-            None => {
-                return Stmt {
-                    kind: StmtKind::End,
-                    span: *start_span,
-                }
-            }
+            None => return Stmt::new(StmtKind::End, *start_span),
         };
 
         match token.kind {
@@ -641,10 +638,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
             _ => {
                 self.expect_eos();
-                Stmt {
-                    kind: StmtKind::End,
-                    span: *start_span,
-                }
+                Stmt::new(StmtKind::End, *start_span)
             }
         }
     }
@@ -653,10 +647,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn contains(&mut self, start_span: Span) -> Stmt<'arena> {
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::Contains,
-            span: start_span,
-        }
+        Stmt::new(StmtKind::Contains, start_span)
     }
 
     pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
@@ -673,9 +664,44 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {}
         };
 
-        let token = self.bump()?;
+        let mut token = self.bump()?;
 
-        let stmt = match token.kind {
+        let label = match token.kind {
+            TokenKind::DigitString => {
+                let num = token
+                    .try_into_uint(&self.text, &self.arena.big_uints)
+                    .unwrap();
+                let label = match num {
+                    Uint::Big(_) => None,
+                    Uint::Small(x) => {
+                        if x >= 100000 {
+                            None
+                        } else {
+                            Some(x)
+                        }
+                    }
+                };
+
+                let label_span = token.span;
+
+                token = self.bump()?;
+
+                if let Some(label) = label {
+                    Some(Spanned::new(label, label_span))
+                } else {
+                    self.emit_error_span(
+                        ParserErrorCode::TooLongLabel,
+                        label_span,
+                        "A label may not exceed five digits.",
+                    );
+
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        let mut stmt = match token.kind {
             TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
             TokenKind::Keyword(KeywordTokenKind::Implicit) => self.implicit_stmt(token.span),
             TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
@@ -695,12 +721,25 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             TokenKind::Keyword(KeywordTokenKind::EndBlockData) => {
                 self.stmt_from_end_block_data(token.span)
             }
-            t if t.is_eos() => Stmt {
-                kind: StmtKind::Empty,
-                span: token.span,
-            },
+            TokenKind::Keyword(KeywordTokenKind::Format) => {
+                let stmt = self.stmt_from_format(token.span);
+
+                if label.is_none() {
+                    self.emit_error_span(
+                        ParserErrorCode::UnlabeledFormatStatement,
+                        stmt.span,
+                        "A format statement must be labeled",
+                    );
+                }
+
+                stmt
+            }
+            t if t.is_eos() => Stmt::new(StmtKind::Empty, token.span),
             _ => self.unclassifiable(token.span.start, token.span.end),
         };
+
+        stmt.span = label.map(|l| l.span.concat(stmt.span)).unwrap_or(stmt.span);
+        stmt.label = label;
 
         Some(stmt)
     }

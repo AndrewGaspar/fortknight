@@ -37,10 +37,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             None => {
                 // error condition, but return empty spec_list
                 self.expect_eos();
-                return Stmt {
-                    kind: StmtKind::Implicit(ImplicitStmt::SpecList(&[])),
-                    span: implicit_span,
-                };
+                return Stmt::new(
+                    StmtKind::Implicit(ImplicitStmt::SpecList(&[])),
+                    implicit_span,
+                );
             }
         };
 
@@ -80,10 +80,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             self.expect_eos();
         }
 
-        Stmt {
-            kind: StmtKind::Implicit(ImplicitStmt::SpecList(specs)),
-            span: specs.last().map_or(implicit_span, |spec| spec.span),
-        }
+        Stmt::new(
+            StmtKind::Implicit(ImplicitStmt::SpecList(specs)),
+            specs.last().map_or(implicit_span, |spec| spec.span),
+        )
     }
 
     /// R863: implicit-stmt, when NONE
@@ -108,13 +108,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         };
 
         if !has_spec_list {
-            return Stmt {
-                kind: StmtKind::Implicit(ImplicitStmt::NoneSpecList {
+            return Stmt::new(
+                StmtKind::Implicit(ImplicitStmt::NoneSpecList {
                     has_external: false,
                     has_type: false,
                 }),
-                span: implicit_none_span,
-            };
+                implicit_none_span,
+            );
         }
 
         let mut has_external = false;
@@ -197,13 +197,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::Implicit(ImplicitStmt::NoneSpecList {
+        Stmt::new(
+            StmtKind::Implicit(ImplicitStmt::NoneSpecList {
                 has_external,
                 has_type,
             }),
-            span: implicit_none_span.concat(end_span),
-        }
+            implicit_none_span.concat(end_span),
+        )
     }
 
     /// R864: implicit-spec

@@ -75,7 +75,7 @@ impl<'input> Tokenizer<'input> {
     }
 
     /// Lexing behavior changes depending on whether we're in "normal" mode or "format" mode.
-    pub fn set_lex_mode(&mut self, mode: LexMode) {
+    pub fn lex_mode(&mut self, mode: LexMode) {
         self.mode = mode;
         match self.mode {
             LexMode::Format => {

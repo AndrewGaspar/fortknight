@@ -131,6 +131,8 @@ pub enum ParserErrorCode {
     ExpectedBinaryConstant,
     ExpectedOctalConstant,
     ExpectedHexConstant,
+    TooLongLabel,
+    UnlabeledFormatStatement,
 }
 
 impl ParserErrorCode {
@@ -153,6 +155,8 @@ impl ParserErrorCode {
             ExpectedBinaryConstant => 12,
             ExpectedOctalConstant => 13,
             ExpectedHexConstant => 14,
+            TooLongLabel => 15,
+            UnlabeledFormatStatement => 16,
         };
         debug_assert!(code < 1000);
         code

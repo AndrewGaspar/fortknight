@@ -72,9 +72,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::Assignment(AssignmentStmt { variable, expr }),
-            span: designator.span.concat(expr.span),
-        }
+        Stmt::new(
+            StmtKind::Assignment(AssignmentStmt { variable, expr }),
+            designator.span.concat(expr.span),
+        )
     }
 }

@@ -30,28 +30,22 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::BlockData { name },
-            span: Span {
+        Stmt::new(
+            StmtKind::BlockData { name },
+            Span {
                 file_id: self.file_id,
                 start: block_data_span.start,
                 end: name.map_or(block_data_span.end, |spanned| spanned.span.end),
             },
-        }
+        )
     }
 
     /// Parses a statement after consuming a single `BLOCK` token. Could be a block-data-stmt or
     /// a block-stmt.
     pub(super) fn stmt_from_block(&mut self, start_span: Span) -> Stmt<'arena> {
         match self.peek() {
-            Some(t) if Self::is_eos(&t) => Stmt {
-                kind: StmtKind::Block { name: None },
-                span: start_span,
-            },
-            None => Stmt {
-                kind: StmtKind::Block { name: None },
-                span: start_span,
-            },
+            Some(t) if Self::is_eos(&t) => Stmt::new(StmtKind::Block { name: None }, start_span),
+            None => Stmt::new(StmtKind::Block { name: None }, start_span),
             Some(Token {
                 kind: TokenKind::Keyword(KeywordTokenKind::Data),
                 ..
@@ -68,10 +62,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
                 self.take_until_eos();
 
-                Stmt {
-                    kind: StmtKind::Block { name: None },
-                    span: start_span,
-                }
+                Stmt::new(StmtKind::Block { name: None }, start_span)
             }
         }
     }
@@ -100,12 +91,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::EndBlockData { name },
-            span: name.map_or(end_block_data_span, |name| {
+        Stmt::new(
+            StmtKind::EndBlockData { name },
+            name.map_or(end_block_data_span, |name| {
                 end_block_data_span.concat(name.span)
             }),
-        }
+        )
     }
 
     pub(super) fn stmt_from_end_block(&mut self, end_block_span: Span) -> Stmt<'arena> {
@@ -144,9 +135,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.expect_eos();
 
-        Stmt {
-            kind: StmtKind::EndBlock { name },
-            span: name.map_or(end_block_span, |name| end_block_span.concat(name.span)),
-        }
+        Stmt::new(
+            StmtKind::EndBlock { name },
+            name.map_or(end_block_span, |name| end_block_span.concat(name.span)),
+        )
     }
 }

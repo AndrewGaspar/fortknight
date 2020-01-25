@@ -21,14 +21,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     }) => {
                         let end = self.bump().unwrap().span.end;
 
-                        Stmt {
-                            kind: StmtKind::Import(ImportStmt::AllSpecifier),
-                            span: Span {
+                        Stmt::new(
+                            StmtKind::Import(ImportStmt::AllSpecifier),
+                            Span {
                                 file_id: self.file_id,
                                 start: start_span.start,
                                 end,
                             },
-                        }
+                        )
                     }
                     Some(Token {
                         kind: TokenKind::Keyword(KeywordTokenKind::None),
@@ -36,14 +36,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     }) => {
                         let end = self.bump().unwrap().span.end;
 
-                        Stmt {
-                            kind: StmtKind::Import(ImportStmt::NoneSpecifier),
-                            span: Span {
+                        Stmt::new(
+                            StmtKind::Import(ImportStmt::NoneSpecifier),
+                            Span {
                                 file_id: self.file_id,
                                 start: start_span.start,
                                 end,
                             },
-                        }
+                        )
                     }
                     Some(Token {
                         kind: TokenKind::Keyword(KeywordTokenKind::Only),
@@ -64,14 +64,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         self.take_until_eos();
 
                         // Treat like an unqualified import statement
-                        Stmt {
-                            kind: StmtKind::Import(ImportStmt::NoSpecifier(&[])),
-                            span: Span {
+                        Stmt::new(
+                            StmtKind::Import(ImportStmt::NoSpecifier(&[])),
+                            Span {
                                 file_id: self.file_id,
                                 start: start_span.start,
                                 end: start_span.end,
                             },
-                        }
+                        )
                     }
                 }
             }
@@ -86,26 +86,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(t) if Self::is_eos(&t) => {
                 self.expect_eos();
 
-                Stmt {
-                    kind: StmtKind::Import(ImportStmt::NoSpecifier(&[])),
-                    span: Span {
+                Stmt::new(
+                    StmtKind::Import(ImportStmt::NoSpecifier(&[])),
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end: start_span.end,
                     },
-                }
+                )
             }
             None => {
                 self.expect_eos();
 
-                Stmt {
-                    kind: StmtKind::Import(ImportStmt::NoSpecifier(&[])),
-                    span: Span {
+                Stmt::new(
+                    StmtKind::Import(ImportStmt::NoSpecifier(&[])),
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end: start_span.end,
                     },
-                }
+                )
             }
             _ => {
                 self.emit_expected_token(&eos_or(&[
@@ -117,14 +117,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 // advance to end of statement
                 self.take_until_eos();
 
-                Stmt {
-                    kind: StmtKind::Import(ImportStmt::NoSpecifier(&[])),
-                    span: Span {
+                Stmt::new(
+                    StmtKind::Import(ImportStmt::NoSpecifier(&[])),
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end: start_span.end,
                     },
-                }
+                )
             }
         }
     }
@@ -133,14 +133,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn import_unspecified_statement(&mut self, start_span: Span) -> Stmt<'arena> {
         let imports = self.import_name_list();
 
-        Stmt {
-            kind: StmtKind::Import(ImportStmt::NoSpecifier(imports)),
-            span: Span {
+        Stmt::new(
+            StmtKind::Import(ImportStmt::NoSpecifier(imports)),
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end: imports.last().map_or(start_span.end, |imp| imp.span.end),
             },
-        }
+        )
     }
 
     /// Parses the rest of an import, only statement, starting from colon
@@ -157,27 +157,27 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
                 self.take_until_eos();
 
-                return Stmt {
-                    kind: StmtKind::Import(ImportStmt::OnlySpecifier(&[])),
-                    span: Span {
+                return Stmt::new(
+                    StmtKind::Import(ImportStmt::OnlySpecifier(&[])),
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end: only_end_span.end,
                     },
-                };
+                );
             }
         };
 
         let imports = self.import_name_list();
 
-        Stmt {
-            kind: StmtKind::Import(ImportStmt::OnlySpecifier(imports)),
-            span: Span {
+        Stmt::new(
+            StmtKind::Import(ImportStmt::OnlySpecifier(imports)),
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end: imports.last().map_or(only_end_span.end, |imp| imp.span.end),
             },
-        }
+        )
     }
 
     /// Parses an import-name-list

@@ -856,18 +856,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        let unspecified_use = Stmt {
-            kind: StmtKind::Use {
+        let unspecified_use = Stmt::new(
+            StmtKind::Use {
                 module_nature,
                 name,
                 imports: ModuleImportList::Unspecified,
             },
-            span: Span {
+            Span {
                 file_id: self.file_id,
                 start: start_span.start,
                 end,
             },
-        };
+        );
 
         if is_at_end {
             return unspecified_use;
@@ -1015,18 +1015,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             self.rename()
                         })));
 
-                Stmt {
-                    kind: StmtKind::Use {
+                Stmt::new(
+                    StmtKind::Use {
                         module_nature,
                         name,
                         imports: ModuleImportList::RenameList(renames),
                     },
-                    span: Span {
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end,
                     },
-                }
+                )
             }
             FirstRenameOrOnly::Only => {
                 debug_assert_eq!(TokenKind::Colon, self.peek().unwrap().kind);
@@ -1059,18 +1059,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     self.only()
                 }));
 
-                Stmt {
-                    kind: StmtKind::Use {
+                Stmt::new(
+                    StmtKind::Use {
                         module_nature,
                         name,
                         imports: ModuleImportList::OnlyList(onlys),
                     },
-                    span: Span {
+                    Span {
                         file_id: self.file_id,
                         start: start_span.start,
                         end,
                     },
-                }
+                )
             }
         }
     }
