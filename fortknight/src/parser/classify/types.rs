@@ -11,14 +11,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parse a type-param-value form start
     fn type_param_value(&mut self) -> Option<Spanned<TypeParamValue<'arena>>> {
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::Star) => Some(Spanned::new(
                 TypeParamValue::Star,
-                self.bump().unwrap().span,
+                self.tokenizer.bump().unwrap().span,
             )),
             Some(TokenKind::Colon) => Some(Spanned::new(
                 TypeParamValue::Colon,
-                self.bump().unwrap().span,
+                self.tokenizer.bump().unwrap().span,
             )),
             _ => {
                 // TODO: Check for expression start and emit an "unexpected token" error if it
@@ -37,7 +37,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a declaration-type-spec from the start of the type. Returns None if the parse fails -
     /// does not consume the failure token.
     pub(super) fn declaration_type_spec(&mut self) -> Option<Spanned<DeclarationTypeSpec<'arena>>> {
-        match self.peek().map(|t| t.kind) {
+        match self.tokenizer.peek().map(|t| t.kind) {
             Some(t) if t.is_intrinsic_type_spec_start() => {
                 let spec = self.intrinsic_type_spec()?;
                 Some(Spanned::new(
@@ -46,11 +46,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 ))
             }
             Some(TokenKind::Keyword(KeywordTokenKind::Type)) => {
-                let start_span = self.bump().unwrap().span;
+                let start_span = self.tokenizer.bump().unwrap().span;
 
-                match self.peek().map(|t| t.kind) {
+                match self.tokenizer.peek().map(|t| t.kind) {
                     Some(TokenKind::LeftParen) => {
-                        self.bump().unwrap();
+                        self.tokenizer.bump().unwrap();
                     }
                     _ => {
                         self.emit_expected_token(&[TokenKind::LeftParen]);
@@ -64,13 +64,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     Wildcard,
                 };
 
-                let type_spec = match self.peek().map(|t| t.kind) {
+                let type_spec = match self.tokenizer.peek().map(|t| t.kind) {
                     Some(t) if t.is_intrinsic_type_spec_start() => {
                         Either::Intrinsic(self.intrinsic_type_spec()?)
                     }
                     Some(t) if t.is_name() => Either::Derived(self.derived_type_spec()?.val),
                     Some(TokenKind::Star) => {
-                        self.bump();
+                        self.tokenizer.bump();
                         Either::Wildcard
                     }
                     _ => {
@@ -79,8 +79,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     }
                 };
 
-                let end_span = match self.peek().map(|t| t.kind) {
-                    Some(TokenKind::RightParen) => self.bump().unwrap().span,
+                let end_span = match self.tokenizer.peek().map(|t| t.kind) {
+                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
                     _ => {
                         self.emit_expected_token(&[TokenKind::RightParen]);
                         return None;
@@ -102,11 +102,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
             }
             Some(TokenKind::Keyword(KeywordTokenKind::Class)) => {
-                let start_span = self.bump().unwrap().span;
+                let start_span = self.tokenizer.bump().unwrap().span;
 
-                match self.peek().map(|t| t.kind) {
+                match self.tokenizer.peek().map(|t| t.kind) {
                     Some(TokenKind::LeftParen) => {
-                        self.bump().unwrap();
+                        self.tokenizer.bump().unwrap();
                     }
                     _ => {
                         self.emit_expected_token(&[TokenKind::LeftParen]);
@@ -119,10 +119,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     Wildcard,
                 };
 
-                let type_spec = match self.peek().map(|t| t.kind) {
+                let type_spec = match self.tokenizer.peek().map(|t| t.kind) {
                     Some(t) if t.is_name() => Either::Derived(self.derived_type_spec()?.val),
                     Some(TokenKind::Star) => {
-                        self.bump();
+                        self.tokenizer.bump();
                         Either::Wildcard
                     }
                     _ => {
@@ -131,8 +131,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     }
                 };
 
-                let end_span = match self.peek().map(|t| t.kind) {
-                    Some(TokenKind::RightParen) => self.bump().unwrap().span,
+                let end_span = match self.tokenizer.peek().map(|t| t.kind) {
+                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
                     _ => {
                         self.emit_expected_token(&[TokenKind::RightParen]);
                         return None;
@@ -163,7 +163,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an intrinsic type spec from its start. Returns None if the parse fails and does not
     /// consume the failing token.
     fn intrinsic_type_spec(&mut self) -> Option<Spanned<IntrinsicTypeSpec<'arena>>> {
-        match self.peek().map(|t| t.kind) {
+        match self.tokenizer.peek().map(|t| t.kind) {
             Some(TokenKind::Keyword(KeywordTokenKind::Integer)) => {
                 self.type_spec(KeywordTokenKind::Integer)
             }
@@ -179,10 +179,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(TokenKind::Keyword(KeywordTokenKind::Logical)) => {
                 self.type_spec(KeywordTokenKind::Logical)
             }
-            Some(TokenKind::Keyword(KeywordTokenKind::Double)) => match self.peek_nth_kind(1) {
+            Some(TokenKind::Keyword(KeywordTokenKind::Double)) => match self
+                .tokenizer
+                .peek_nth_kind(1)
+            {
                 Some(TokenKind::Keyword(KeywordTokenKind::Precision)) => {
-                    let start_span = self.bump().unwrap().span;
-                    let end_span = self.bump().unwrap().span;
+                    let start_span = self.tokenizer.bump().unwrap().span;
+                    let end_span = self.tokenizer.bump().unwrap().span;
                     Some(Spanned::new(
                         IntrinsicTypeSpec::DoublePrecision,
                         start_span.concat(end_span),
@@ -195,7 +198,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             },
             Some(TokenKind::Keyword(KeywordTokenKind::DoublePrecision)) => Some(Spanned::new(
                 IntrinsicTypeSpec::DoublePrecision,
-                self.bump().unwrap().span,
+                self.tokenizer.bump().unwrap().span,
             )),
             _ => {
                 self.emit_expected_token(&intrinsic_type_spec_or(&[]));
@@ -209,15 +212,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         &mut self,
         expected_keyword: KeywordTokenKind,
     ) -> Option<Spanned<IntrinsicTypeSpec<'arena>>> {
-        let span = match self.peek_kind() {
-            Some(TokenKind::Keyword(k)) if k == expected_keyword => self.bump().unwrap().span,
+        let span = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Keyword(k)) if k == expected_keyword => {
+                self.tokenizer.bump().unwrap().span
+            }
             _ => {
                 self.emit_expected_token(&[TokenKind::Keyword(expected_keyword)]);
                 return None;
             }
         };
 
-        let kind = match self.peek_kind() {
+        let kind = match self.tokenizer.peek_kind() {
             Some(TokenKind::LeftParen) => Some(self.kind_selector()?),
             _ => None,
         };
@@ -266,20 +271,20 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses the kind-selector of a type from the parentheses
     fn kind_selector(&mut self) -> Option<Spanned<KindSelector<'arena>>> {
-        let begin_span = match self.peek().map(|t| t.kind) {
-            Some(TokenKind::LeftParen) => self.bump().unwrap().span,
+        let begin_span = match self.tokenizer.peek().map(|t| t.kind) {
+            Some(TokenKind::LeftParen) => self.tokenizer.bump().unwrap().span,
             _ => {
                 self.emit_expected_token(&[TokenKind::LeftParen]);
                 return None;
             }
         };
 
-        match self.peek().map(|t| t.kind) {
+        match self.tokenizer.peek().map(|t| t.kind) {
             Some(TokenKind::Keyword(KeywordTokenKind::Kind)) => {
-                match self.peek_nth(1).map(|t| t.kind) {
+                match self.tokenizer.peek_nth(1).map(|t| t.kind) {
                     Some(TokenKind::Equals) => {
-                        self.bump(); // consume KIND
-                        self.bump(); // consume =
+                        self.tokenizer.bump(); // consume KIND
+                        self.tokenizer.bump(); // consume =
                     }
                     Some(TokenKind::LeftParen) => {
                         // assume we're in an expression and let the expression parsing take over
@@ -297,8 +302,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         let expr = self.expr()?;
 
-        let end_span = match self.peek_kind() {
-            Some(TokenKind::RightParen) => self.bump().unwrap().span,
+        let end_span = match self.tokenizer.peek_kind() {
+            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
             _ => {
                 self.emit_expected_token(&[TokenKind::RightParen]);
                 return None;
@@ -316,9 +321,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses from the `type-name`
     fn derived_type_spec(&mut self) -> Option<Spanned<DerivedTypeSpec<'arena>>> {
-        let (name, start_span) = match self.peek_kind() {
+        let (name, start_span) = match self.tokenizer.peek_kind() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 (
                     t.try_intern_contents(&mut self.interner, &self.text)
@@ -332,9 +337,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::LeftParen) => {
-                self.bump();
+                self.tokenizer.bump();
             }
             _ => {
                 return Some(Spanned::new(
@@ -351,9 +356,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         let spec_list = self.arena.type_param_specs.alloc_extend(
             std::iter::once(self.type_param_spec()?.val).chain(std::iter::from_fn(|| {
-                match self.peek_kind() {
+                match self.tokenizer.peek_kind() {
                     Some(TokenKind::Comma) => {
-                        self.bump();
+                        self.tokenizer.bump();
                     }
                     // End of list - return none
                     Some(TokenKind::RightParen) => return None,
@@ -388,8 +393,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             .unwrap();
         }
 
-        let end_span = match self.peek_kind() {
-            Some(TokenKind::RightParen) => self.bump().unwrap().span,
+        let end_span = match self.tokenizer.peek_kind() {
+            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
             _ => {
                 self.emit_expected_token(&[TokenKind::RightParen]);
                 return None;
@@ -406,13 +411,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses a type-param-spec
     fn type_param_spec(&mut self) -> Option<Spanned<TypeParamSpec<'arena>>> {
-        let keyword_and_span = match self.peek_nth_kind(0) {
+        let keyword_and_span = match self.tokenizer.peek_nth_kind(0) {
             Some(t) if t.is_name() => {
                 // Might be a keyword, check for =
-                match self.peek_nth_kind(1) {
+                match self.tokenizer.peek_nth_kind(1) {
                     Some(TokenKind::Equals) => {
-                        let keyword = self.bump().unwrap(); // keyword
-                        self.bump(); // =
+                        let keyword = self.tokenizer.bump().unwrap(); // keyword
+                        self.tokenizer.bump(); // =
                         Some((
                             keyword
                                 .try_intern_contents(&mut self.interner, &self.text)

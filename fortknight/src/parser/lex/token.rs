@@ -241,7 +241,7 @@ impl Token {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TokenKind {
     // user strings
     Name,
@@ -691,7 +691,7 @@ impl TokenKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive, PartialOrd, Ord)]
 pub enum Letter {
     A = 0,
     B,
@@ -721,7 +721,7 @@ pub enum Letter {
     Z,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive, PartialOrd, Ord)]
 pub enum KeywordTokenKind {
     /// This must be the first keyword value in this list.
     MinimumKeywordKind = 1,
@@ -1361,7 +1361,7 @@ impl KeywordTokenKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive, PartialOrd, Ord)]
 pub enum FormatSpecifier {
     Min,
     I,

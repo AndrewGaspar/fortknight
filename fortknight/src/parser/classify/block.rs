@@ -7,9 +7,9 @@ use super::{eos_or, Classifier};
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a statement after consuming a `BLOCK DATA` token chain.
     pub(super) fn stmt_from_block_data(&mut self, block_data_span: Span) -> Stmt<'arena> {
-        let name = match self.peek() {
+        let name = match self.tokenizer.peek() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 Some(Spanned::new(
                     t.try_intern_contents(&mut self.interner, &self.text)
@@ -43,7 +43,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a statement after consuming a single `BLOCK` token. Could be a block-data-stmt or
     /// a block-stmt.
     pub(super) fn stmt_from_block(&mut self, start_span: Span) -> Stmt<'arena> {
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(t) if Self::is_eos(&t) => Stmt {
                 kind: StmtKind::Block { name: None },
                 span: start_span,
@@ -56,7 +56,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 kind: TokenKind::Keyword(KeywordTokenKind::Data),
                 ..
             }) => {
-                let end = self.bump().unwrap().span.end;
+                let end = self.tokenizer.bump().unwrap().span.end;
                 self.stmt_from_block_data(Span {
                     file_id: self.file_id,
                     start: start_span.start,
@@ -77,9 +77,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub(super) fn stmt_from_end_block_data(&mut self, end_block_data_span: Span) -> Stmt<'arena> {
-        let name = match self.peek() {
+        let name = match self.tokenizer.peek() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 Some(Spanned::new(
                     t.try_intern_contents(&mut self.interner, &self.text)
@@ -109,18 +109,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub(super) fn stmt_from_end_block(&mut self, end_block_span: Span) -> Stmt<'arena> {
-        let name = match self.peek() {
+        let name = match self.tokenizer.peek() {
             // If we see `Data`, we always classify as `EndBlockData`, even though it could actually
             // be an `EndBlock` with name "data". We'll resolve the ambiguity at the ast level
             Some(Token {
                 kind: TokenKind::Keyword(KeywordTokenKind::Data),
                 ..
             }) => {
-                let span = self.bump().unwrap().span;
+                let span = self.tokenizer.bump().unwrap().span;
                 return self.stmt_from_end_block_data(end_block_span.concat(span));
             }
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 Some(Spanned::new(
                     t.try_intern_contents(&mut self.interner, &self.text)

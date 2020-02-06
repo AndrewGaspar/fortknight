@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::iter::Iterator;
 
 use num_traits::FromPrimitive;
@@ -892,4 +893,99 @@ fn is_recognized_character(c: char, tokenize_preprocessor: bool) -> bool {
             '#' => tokenize_preprocessor,
             _ => false,
         }
+}
+
+/// A Tokenizer that can lookahead and can efficiently flush the peeked tokens when a "mode" change
+/// occurs.
+pub struct PeekableTokenizer<'input> {
+    tokenizer: Tokenizer<'input>,
+    peeking_tokenizer: Option<Tokenizer<'input>>,
+    peeked: VecDeque<Token>,
+    num_behind: usize,
+}
+
+impl<'input> PeekableTokenizer<'input> {
+    pub fn new(
+        options: &TokenizerOptions,
+        file_id: FileId,
+        text: &'input str,
+        diagnostics: &'input RefCell<DiagnosticSink>,
+    ) -> Self {
+        Self {
+            tokenizer: Tokenizer::new(options, file_id, text, diagnostics),
+            peeking_tokenizer: None,
+            peeked: VecDeque::new(),
+            num_behind: 0,
+        }
+    }
+
+    /// Get the tokenizer up-to-date with the peeking tokenizer and discard peeked state.
+    fn reset(&mut self) {
+        self.peeked.clear();
+        self.peeking_tokenizer = None;
+
+        // If the non-peeking tokenizer is behind, it needs to be caught up by manually advancing
+        // it.
+        while self.num_behind > 0 {
+            self.next();
+            self.num_behind -= 1;
+        }
+    }
+
+    pub fn peek(&mut self) -> Option<&Token> {
+        self.peek_nth(0)
+    }
+
+    pub fn peek_nth(&mut self, n: usize) -> Option<&Token> {
+        let tokenizer = &self.tokenizer;
+        let peeking_tokenizer = &mut self.peeking_tokenizer;
+
+        let tokenizer = peeking_tokenizer.get_or_insert_with(|| tokenizer.clone());
+
+        while n + 1 > self.peeked.len() {
+            if let Some(t) = tokenizer.next() {
+                self.peeked.push_back(t);
+            } else {
+                if self.peeked.is_empty() {
+                    self.peeking_tokenizer = None;
+                }
+                return None;
+            }
+        }
+
+        Some(&self.peeked[n])
+    }
+
+    /// Lexing behavior changes depending on whether we're in "normal" mode or "format" mode.
+    pub fn set_lex_mode(&mut self, mode: LexMode) {
+        self.reset();
+        self.tokenizer.set_lex_mode(mode);
+    }
+}
+
+impl<'input> Iterator for PeekableTokenizer<'input> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If some tokens have been peeked already
+        if !self.peeked.is_empty() {
+            // track that the tokenizer is behind, so will need to catch up if there's a mode
+            // change.
+            self.num_behind += 1;
+            let result = self.peeked.pop_front();
+
+            // If there are no more peeked tokens, reset the peeked state and fast-forward the
+            // tokenizer.
+            if self.peeked.is_empty() {
+                debug_assert!(self.peeking_tokenizer.is_some());
+                self.tokenizer = self.peeking_tokenizer.take().unwrap();
+
+                self.num_behind = 0;
+            }
+
+            result
+        } else {
+            self.tokenizer.next()
+        }
+    }
 }

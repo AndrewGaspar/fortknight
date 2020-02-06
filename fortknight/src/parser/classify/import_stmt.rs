@@ -7,19 +7,19 @@ use super::{eos_or, Classifier};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     pub(super) fn import_statement(&mut self, start_span: Span) -> Stmt<'arena> {
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(Token {
                 kind: TokenKind::Comma,
                 ..
             }) => {
-                self.bump();
+                self.tokenizer.bump();
 
-                match self.peek() {
+                match self.tokenizer.peek() {
                     Some(Token {
                         kind: TokenKind::Keyword(KeywordTokenKind::All),
                         ..
                     }) => {
-                        let end = self.bump().unwrap().span.end;
+                        let end = self.tokenizer.bump().unwrap().span.end;
 
                         Stmt {
                             kind: StmtKind::Import(ImportStmt::AllSpecifier),
@@ -34,7 +34,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         kind: TokenKind::Keyword(KeywordTokenKind::None),
                         ..
                     }) => {
-                        let end = self.bump().unwrap().span.end;
+                        let end = self.tokenizer.bump().unwrap().span.end;
 
                         Stmt {
                             kind: StmtKind::Import(ImportStmt::NoneSpecifier),
@@ -49,7 +49,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         kind: TokenKind::Keyword(KeywordTokenKind::Only),
                         ..
                     }) => {
-                        let span = self.bump().unwrap().span;
+                        let span = self.tokenizer.bump().unwrap().span;
 
                         self.import_only_statement(start_span, span)
                     }
@@ -79,7 +79,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 kind: TokenKind::ColonColon,
                 ..
             }) => {
-                self.bump();
+                self.tokenizer.bump();
                 self.import_unspecified_statement(start_span)
             }
             Some(t) if t.is_name() => self.import_unspecified_statement(start_span),
@@ -145,12 +145,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     /// Parses the rest of an import, only statement, starting from colon
     fn import_only_statement(&mut self, start_span: Span, only_end_span: Span) -> Stmt<'arena> {
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(Token {
                 kind: TokenKind::Colon,
                 ..
             }) => {
-                self.bump();
+                self.tokenizer.bump();
             }
             _ => {
                 self.emit_expected_token(&[TokenKind::Colon]);
@@ -183,7 +183,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an import-name-list
     fn import_name_list(&mut self) -> &'arena [Spanned<InternedName>] {
         let first_name = loop {
-            match self.peek() {
+            match self.tokenizer.peek() {
                 Some(t) if t.is_name() => {
                     let t = *t;
                     break Spanned::new(
@@ -196,14 +196,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     self.emit_expected_token(&[TokenKind::Name]);
 
                     // consume EOS and stop parsing
-                    self.bump();
+                    self.tokenizer.bump();
                     return &[];
                 }
                 _ => {
                     self.emit_expected_token(&[TokenKind::Name]);
 
                     // consume token and try again
-                    self.bump();
+                    self.tokenizer.bump();
                 }
             }
         };
@@ -214,17 +214,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 // This loop is for handling cases where we reach an unrecognized token but would
                 // like to continue parsing and emitting meaningful errors for as long as possible
                 loop {
-                    match self.peek()? {
+                    match self.tokenizer.peek()? {
                         Token {
                             kind: TokenKind::Comma,
                             ..
                         } => {
                             // Consume comma, move on to name
-                            self.bump();
+                            self.tokenizer.bump();
                         }
                         // Reached EOS, return None to indicate end of list
                         t if Self::is_eos(&t) => {
-                            self.bump();
+                            self.tokenizer.bump();
                             return None;
                         }
                         _ => {
@@ -239,10 +239,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                     };
 
-                    match self.peek() {
+                    match self.tokenizer.peek() {
                         // Found name as expected - return it
                         Some(t) if t.is_name() => {
-                            let t = self.bump().unwrap();
+                            let t = self.tokenizer.bump().unwrap();
                             return Some(Spanned::new(
                                 t.try_intern_contents(&mut self.interner, &self.text)
                                     .unwrap(),

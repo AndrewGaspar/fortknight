@@ -616,6 +616,187 @@ pub struct TeamValue<'a>(&'a Expr<'a>);
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct DoVariable(InternedName);
 
+/// R1301: format-stmt is FORMAT format-specification
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct FormatStmt<'a>(FormatSpecification<'a>);
+
+/// R1302: format-specification
+///     is ( [ format-items ] )
+///     or ( [ format-items , ] unlimited-format-item)
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct FormatSpecification<'a> {
+    format_items: &'a [FormatItem<'a>],
+    unlimited_format_item: Option<UnlimitedFormatItem<'a>>,
+}
+
+/// R1304: format-item
+///     is [ r ] data-edit-desc
+///     or control-edit-desc
+///     or char-string-edit-desc
+///     or [ r ] ( format-items )
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum FormatItem<'a> {
+    DataEditDesc(Option<R<'a>>, DataEditDesc<'a>),
+    ControlEditDesc(ControlEditDesc<'a>),
+    CharStringEditDesc(CharStringEditDesc<'a>),
+    Items(Option<R<'a>>, &'a [FormatItem<'a>]),
+}
+
+/// R1305: unlimited-format-item is * ( format-items )
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct UnlimitedFormatItem<'a> {
+    format_items: &'a [FormatItem<'a>],
+}
+
+/// R1306: r is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct R<'a>(IntLiteralConstant<'a>);
+
+/// R1307: data-edit-desc
+///     is I w [ . m ]
+///     or B w [ . m ]
+///     or O w [ . m ]
+///     or Z w [ . m ]
+///     or F w . d
+///     or E w . d [ E e ]
+///     or EN w . d [ E e ]
+///     or ES w . d [ E e ]
+///     or EX w . d [ E e ]
+///     or G w [ . d [ E e ] ]
+///     or L w
+///     or A [ w ]
+///     or D w . d
+///     or DT [ char-literal-constant ] [ ( v-list ) ]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum DataEditDesc<'a> {
+    I(W<'a>, Option<M<'a>>),
+    B(W<'a>, Option<M<'a>>),
+    O(W<'a>, Option<M<'a>>),
+    Z(W<'a>, Option<M<'a>>),
+    F(W<'a>, D<'a>),
+    E(W<'a>, D<'a>, Option<E<'a>>),
+    EN(W<'a>, D<'a>, Option<E<'a>>),
+    ES(W<'a>, D<'a>, Option<E<'a>>),
+    EX(W<'a>, D<'a>, Option<E<'a>>),
+    G(W<'a>, Option<(D<'a>, Option<E<'a>>)>),
+    L(W<'a>),
+    A(Option<W<'a>>),
+    D(W<'a>, D<'a>),
+    DT(Option<CharLiteralConstant<'a>>, Option<&'a [V<'a>]>),
+}
+
+/// R1308: w is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct W<'a>(IntLiteralConstant<'a>);
+
+/// R1309: m is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct M<'a>(IntLiteralConstant<'a>);
+
+/// R1310: d is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct D<'a>(IntLiteralConstant<'a>);
+
+/// R1311: e is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct E<'a>(IntLiteralConstant<'a>);
+
+/// R1312: v is signed-int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct V<'a>(SignedIntLiteralConstant<'a>);
+
+/// R1313: control-edit-desc
+///     is position-edit-desc
+///     or [ r ] /
+///     or :
+///     or sign-edit-desc
+///     or k P
+///     or blank-interp-edit-desc
+///     or round-edit-desc
+///     or decimal-edit-desc
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ControlEditDesc<'a> {
+    PositionEditDesc(PositionEditDesc<'a>),
+    Slash(Option<R<'a>>),
+    Colon,
+    SignEditDesc(SignEditDesc),
+    P(K<'a>),
+    BlackInterpEditDesc(BlankInterpEditDesc),
+    RoundEditDesc(RoundEditDesc),
+    DecimalEditDesc(DecimalEditDesc),
+}
+
+/// R1314: k is signed-int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct K<'a>(SignedIntLiteralConstant<'a>);
+
+/// R1315: position-edit-desc
+///     is T n
+///     or TL n
+///     or TR n
+///     or n X
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum PositionEditDesc<'a> {
+    T(N<'a>),
+    TL(N<'a>),
+    TR(N<'a>),
+    X(N<'a>),
+}
+
+/// R1316: n is int-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct N<'a>(IntLiteralConstant<'a>);
+
+/// R1317: sign-edit-desc
+///     is SS
+///     or SP
+///     or S
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SignEditDesc {
+    SS,
+    SP,
+    S,
+}
+
+/// R1318: blank-interp-edit-desc
+///     is BN
+///     or BZ
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum BlankInterpEditDesc {
+    BN,
+    BZ,
+}
+
+/// R1319: round-edit-desc
+///     is RU
+///     or RD
+///     or RZ
+///     or RN
+///     or RC
+///     or RP
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum RoundEditDesc {
+    RU,
+    RD,
+    RZ,
+    RN,
+    RC,
+    RP,
+}
+
+/// R1320: decimal-edit-desc
+///     is DC
+///     or DP
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum DecimalEditDesc {
+    DC,
+    DP,
+}
+
+/// R1321: char-string-edit-desc is char-literal-constant
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct CharStringEditDesc<'a>(CharLiteralConstant<'a>);
+
 /// R1418: parent-identifer is ancestore-module-name [ : parent-submodule-name ]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ParentIdentifier {
@@ -727,6 +908,10 @@ pub enum StmtKind<'a> {
     EndBlock {
         name: Option<Spanned<InternedName>>,
     },
+
+    /// R1301: format-stmt
+    ///     is FORMAT format-specification
+    Format(FormatStmt<'a>),
 
     /// R1402: program-stmt is `program name?`
     Program {

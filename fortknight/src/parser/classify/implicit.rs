@@ -8,23 +8,18 @@ use super::statements::{
     DeclarationTypeSpec, ImplicitSpec, ImplicitStmt, IntegerTypeSpec, IntrinsicTypeSpec,
     LetterSpec, Spanned, Stmt, StmtKind,
 };
-use super::{declaration_type_spec_or, eos_or, Classifier};
+use super::{eos_or, Classifier};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an implicit-stmt after consuming the `IMPLICIT` token
     pub(super) fn implicit_stmt(&mut self, implicit_span: Span) -> Stmt<'arena> {
-        match self.peek().map(|t| t.kind) {
-            Some(TokenKind::Keyword(KeywordTokenKind::None)) => {
-                let none_span = self.bump().unwrap().span;
-                self.implicit_none_stmt(implicit_span.concat(none_span))
-            }
-            // Try for an implicit-type stmt instead
-            Some(t) if t.is_declaration_type_spec_start() => self.implicit_type_stmt(implicit_span),
-            // Everything else is unexpected
-            _ => self.expected_token(
-                &declaration_type_spec_or(&[TokenKind::Keyword(KeywordTokenKind::None)]),
-                &implicit_span,
-            ),
+        if self.check(TokenKind::Keyword(KeywordTokenKind::None)) {
+            let none_span = self.tokenizer.bump().unwrap().span;
+            self.implicit_none_stmt(implicit_span.concat(none_span))
+        } else if self.check_declaration_type_spec_start() {
+            self.implicit_type_stmt(implicit_span)
+        } else {
+            self.unexpected_token(&implicit_span)
         }
     }
 
@@ -50,9 +45,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             .arena
             .implicit_specs
             .alloc_extend(std::iter::once(spec).chain(std::iter::from_fn(|| {
-                match self.peek_kind() {
+                match self.tokenizer.peek_kind() {
                     Some(TokenKind::Comma) => {
-                        self.bump();
+                        self.tokenizer.bump();
                     }
                     Some(t) if t.is_eos() => {
                         return None;
@@ -90,9 +85,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses an implicit-stmt after consuming `IMPLICIT NONE`
     fn implicit_none_stmt(&mut self, implicit_none_span: Span) -> Stmt<'arena> {
-        let has_spec_list = match self.peek().map(|t| t.kind) {
+        let has_spec_list = match self.tokenizer.peek().map(|t| t.kind) {
             Some(TokenKind::LeftParen) => {
-                self.bump();
+                self.tokenizer.bump();
                 true
             }
             Some(tk) if tk.is_eos() => false,
@@ -122,9 +117,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         let mut is_first = true;
         let end_span = loop {
-            match self.peek().map(|t| t.kind) {
+            match self.tokenizer.peek().map(|t| t.kind) {
                 Some(TokenKind::Keyword(KeywordTokenKind::External)) => {
-                    let span = self.bump().unwrap().span;
+                    let span = self.tokenizer.bump().unwrap().span;
 
                     if has_external {
                         self.emit_semantic_error(
@@ -139,7 +134,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     has_external = true;
                 }
                 Some(TokenKind::Keyword(KeywordTokenKind::Type)) => {
-                    let span = self.bump().unwrap().span;
+                    let span = self.tokenizer.bump().unwrap().span;
 
                     if has_type {
                         self.emit_semantic_error(
@@ -153,7 +148,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
                     has_type = true;
                 }
-                Some(TokenKind::RightParen) if is_first => break self.bump().unwrap().span,
+                Some(TokenKind::RightParen) if is_first => {
+                    break self.tokenizer.bump().unwrap().span
+                }
                 _ => {
                     if is_first {
                         self.emit_expected_token(&[
@@ -178,11 +175,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
             is_first = false;
 
-            match self.peek().map(|t| t.kind) {
+            match self.tokenizer.peek().map(|t| t.kind) {
                 Some(TokenKind::Comma) => {
-                    self.bump();
+                    self.tokenizer.bump();
                 }
-                Some(TokenKind::RightParen) => break self.bump().unwrap().span,
+                Some(TokenKind::RightParen) => break self.tokenizer.bump().unwrap().span,
                 _ => {
                     self.emit_expected_token(&[TokenKind::Comma, TokenKind::RightParen]);
 
@@ -212,7 +209,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn implicit_spec(&mut self) -> Option<Spanned<ImplicitSpec<'arena>>> {
         let declaration_type_spec = if self.implicit_spec_type_lookahead_should_skip_kind_selector()
         {
-            let t = self.bump().unwrap();
+            let t = self.tokenizer.bump().unwrap();
             // bump since we know there must be following token
             let intrinsic = match t.kind {
                 TokenKind::Keyword(KeywordTokenKind::Integer) => {
@@ -232,9 +229,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             self.declaration_type_spec()?
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::LeftParen) => {
-                self.bump();
+                self.tokenizer.bump();
             }
             _ => {
                 self.emit_expected_token(&[TokenKind::LeftParen]);
@@ -248,9 +245,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             self.arena
                 .letter_specs
                 .alloc_extend(std::iter::once(letter_spec).chain(std::iter::from_fn(|| {
-                    match self.peek_kind() {
+                    match self.tokenizer.peek_kind() {
                         Some(TokenKind::Comma) => {
-                            self.bump();
+                            self.tokenizer.bump();
                         }
                         Some(TokenKind::RightParen) => return None,
                         _ => {
@@ -262,8 +259,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     Some(self.letter_spec()?.val)
                 })));
 
-        let end_span = match self.peek_kind() {
-            Some(TokenKind::RightParen) => self.bump().unwrap().span,
+        let end_span = match self.tokenizer.peek_kind() {
+            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
             _ => {
                 // expected token already emitted - return
                 return None;
@@ -280,7 +277,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn implicit_spec_type_lookahead_should_skip_kind_selector(&mut self) -> bool {
-        match self.peek_nth_kind(0) {
+        match self.tokenizer.peek_nth_kind(0) {
             Some(t)
                 if t.is_intrinsic_type_spec_start()
                     && t != TokenKind::Keyword(KeywordTokenKind::Double)
@@ -288,7 +285,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => return false,
         };
 
-        if Some(TokenKind::LeftParen) != self.peek_nth_kind(1) {
+        if Some(TokenKind::LeftParen) != self.tokenizer.peek_nth_kind(1) {
             // If the next token is next a left paren, this parse will fail anyway, let it parse.
             return false;
         }
@@ -296,7 +293,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(next_idx) => {
                 // If the following idx is the start of another parenthetical, then the first
                 // parenthetical must be a kind-selector
-                Some(TokenKind::LeftParen) != self.peek_nth_kind(next_idx)
+                Some(TokenKind::LeftParen) != self.tokenizer.peek_nth_kind(next_idx)
             }
             None => true,
         }
@@ -306,8 +303,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses a letter-spec from its start
     fn letter_spec(&mut self) -> Option<Spanned<LetterSpec>> {
-        let (letter, start_span) = match self.peek_kind() {
-            Some(TokenKind::Letter(l)) => (l, self.bump().unwrap().span),
+        let (letter, start_span) = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Letter(l)) => (l, self.tokenizer.bump().unwrap().span),
             _ => {
                 self.emit_expected_token(
                     &(0..26)
@@ -318,9 +315,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::Minus) => {
-                self.bump();
+                self.tokenizer.bump();
             }
             _ => {
                 return Some(Spanned::new(
@@ -333,8 +330,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         }
 
-        let (end_letter, end_span) = match self.peek_kind() {
-            Some(TokenKind::Letter(l)) => (l, self.bump().unwrap().span),
+        let (end_letter, end_span) = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Letter(l)) => (l, self.tokenizer.bump().unwrap().span),
             _ => {
                 self.emit_expected_token(
                     &(0..26)

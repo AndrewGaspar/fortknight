@@ -28,12 +28,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         // wory about stack overflow
 
         // Check if this is a unary expression
-        let unary_op = match self.peek_kind() {
-            Some(TokenKind::NotOp) => Some((UnaryOp::Not, self.bump().unwrap().span)),
-            Some(TokenKind::Plus) => Some((UnaryOp::Plus, self.bump().unwrap().span)),
-            Some(TokenKind::Minus) => Some((UnaryOp::Minus, self.bump().unwrap().span)),
+        let unary_op = match self.tokenizer.peek_kind() {
+            Some(TokenKind::NotOp) => Some((UnaryOp::Not, self.tokenizer.bump().unwrap().span)),
+            Some(TokenKind::Plus) => Some((UnaryOp::Plus, self.tokenizer.bump().unwrap().span)),
+            Some(TokenKind::Minus) => Some((UnaryOp::Minus, self.tokenizer.bump().unwrap().span)),
             Some(TokenKind::DefinedOperator) => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 Some((
                     UnaryOp::Defined(
                         t.try_intern_contents(&mut self.interner, &self.text)
@@ -57,10 +57,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             ));
         }
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::LeftParen) => {
                 let parse_complex_literal_constant = match self.check_complex_literal_part(1) {
-                    Some(next_idx) => match self.peek_nth_kind(next_idx) {
+                    Some(next_idx) => match self.tokenizer.peek_nth_kind(next_idx) {
                         Some(TokenKind::Comma) => true,
                         _ => false,
                     },
@@ -68,12 +68,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 };
 
                 if !parse_complex_literal_constant {
-                    let start_span = self.bump().unwrap().span;
+                    let start_span = self.tokenizer.bump().unwrap().span;
 
                     let expr = self.expr()?.val;
 
-                    let close_span = match self.peek_kind() {
-                        Some(TokenKind::RightParen) => self.bump().unwrap().span,
+                    let close_span = match self.tokenizer.peek_kind() {
+                        Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
                         _ => {
                             self.emit_expected_token(&[TokenKind::RightParen]);
 
@@ -93,21 +93,21 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub(super) fn primary(&mut self) -> Option<Spanned<PrimaryRaw<'arena>>> {
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::LeftParen) => {
-                let start_span = self.bump().unwrap().span;
+                let start_span = self.tokenizer.bump().unwrap().span;
 
                 let real_part = self.complex_literal_part()?.val;
                 assert_eq!(
                     TokenKind::Comma,
-                    self.bump().unwrap().kind,
+                    self.tokenizer.bump().unwrap().kind,
                     "Internal compiler error: We should not have tried to parse this \
                      complex-literal-constant unless there's a comma here."
                 );
                 let imag_part = self.complex_literal_part()?.val;
 
-                let end_span = match self.peek_kind() {
-                    Some(TokenKind::RightParen) => self.bump().unwrap().span,
+                let end_span = match self.tokenizer.peek_kind() {
+                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
                     _ => {
                         self.emit_expected_token(&[TokenKind::RightParen]);
                         return None;
@@ -124,7 +124,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     start_span.concat(end_span),
                 ))
             }
-            Some(TokenKind::DigitString) => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
+            Some(TokenKind::DigitString) => match (
+                self.tokenizer.peek_nth_kind(1),
+                self.tokenizer.peek_nth_kind(2),
+            ) {
                 (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
                     let char_literal_constant = self.char_literal_constant()?;
 
@@ -149,7 +152,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(TokenKind::BinaryConstant)
             | Some(TokenKind::OctalConstant)
             | Some(TokenKind::HexConstant) => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 let uint = t.try_into_uint(&self.text, &self.arena.big_uints).unwrap();
 
                 let boz_constant = match t.kind {
@@ -194,7 +197,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     logical_literal_constant.span,
                 ))
             }
-            Some(t) if t.is_name() => match (self.peek_nth_kind(1), self.peek_nth_kind(2)) {
+            Some(t) if t.is_name() => match (
+                self.tokenizer.peek_nth_kind(1),
+                self.tokenizer.peek_nth_kind(2),
+            ) {
                 // Check for both `_ char-literal-constant` and `char-literal-constant`, since it's
                 // possible the name may end with an underscore, which is legal.
                 (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant))
@@ -216,17 +222,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     /// Parses a KindParam, starting with the `_`.
     fn kind_param(&mut self) -> Option<Spanned<KindParam<'arena>>> {
-        let start_span = match self.peek_kind() {
-            Some(TokenKind::Underscore) => self.bump().unwrap().span,
+        let start_span = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Underscore) => self.tokenizer.bump().unwrap().span,
             _ => {
                 self.emit_expected_token(&[TokenKind::Underscore]);
                 return None;
             }
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 Some(Spanned::new(
                     KindParam::ScalarIntConstantName(
                         t.try_intern_contents(&mut self.interner, &self.text)
@@ -236,7 +242,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 ))
             }
             Some(TokenKind::DigitString) => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 Some(Spanned::new(
                     KindParam::DigitString(
                         t.try_into_uint(&self.text, &self.arena.big_uints).unwrap(),
@@ -252,9 +258,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn reverse_kind_param(&mut self) -> Option<Spanned<KindParam<'arena>>> {
-        let (start_span, kind_param) = match self.peek_kind() {
+        let (start_span, kind_param) = match self.tokenizer.peek_kind() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 let (last_char_index, last_char) =
                     ContinuationStr::new(&self.text[t.span.start as usize..t.span.end as usize])
@@ -293,7 +299,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
             }
             Some(TokenKind::DigitString) => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 (
                     t.span,
                     KindParam::DigitString(
@@ -307,10 +313,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::Underscore) => Some(Spanned::new(
                 kind_param,
-                start_span.concat(self.bump().unwrap().span),
+                start_span.concat(self.tokenizer.bump().unwrap().span),
             )),
             _ => {
                 self.emit_expected_token(&[TokenKind::Underscore]);
@@ -323,17 +329,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Returns index past real-part/imag-part, if it's possible that what we're looking at is a
     /// real-part or imag-part.
     fn check_complex_literal_part(&mut self, idx: usize) -> Option<usize> {
-        let idx = match self.peek_nth_kind(idx)? {
+        let idx = match self.tokenizer.peek_nth_kind(idx)? {
             t if t.is_name() => return Some(idx + 1),
             t if t.is_sign() => idx + 1,
             TokenKind::DigitString | TokenKind::RealLiteralConstant => idx,
             _ => return None,
         };
 
-        match self.peek_nth_kind(idx)? {
+        match self.tokenizer.peek_nth_kind(idx)? {
             TokenKind::DigitString | TokenKind::RealLiteralConstant => {
-                match self.peek_nth_kind(idx + 1) {
-                    Some(TokenKind::Underscore) => match self.peek_nth_kind(idx + 2)? {
+                match self.tokenizer.peek_nth_kind(idx + 1) {
+                    Some(TokenKind::Underscore) => match self.tokenizer.peek_nth_kind(idx + 2)? {
                         t if t.is_name() => Some(idx + 3),
                         TokenKind::DigitString => Some(idx + 3),
                         _ => None,
@@ -348,9 +354,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     /// Parses a real-part or imag-part
     fn complex_literal_part(&mut self) -> Option<Spanned<ComplexLiteralPart<'arena>>> {
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 Some(Spanned::new(
                     ComplexLiteralPart::NamedConstant(
                         t.try_intern_contents(&mut self.interner, &self.text)
@@ -360,7 +366,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 ))
             }
             Some(TokenKind::Plus) | Some(TokenKind::Minus) => {
-                match self.peek_nth_kind(1) {
+                match self.tokenizer.peek_nth_kind(1) {
                     Some(TokenKind::DigitString) => {
                         let signed_int_literal_constant = self.signed_int_literal_constant()?;
 
@@ -383,7 +389,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     }
                     _ => {
                         // bump the +|-, emit expected token
-                        self.bump();
+                        self.tokenizer.bump();
                         self.emit_expected_token(&[
                             TokenKind::DigitString,
                             TokenKind::RealLiteralConstant,
@@ -422,8 +428,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn int_literal_constant(&mut self) -> Option<Spanned<IntLiteralConstant<'arena>>> {
-        let t = match self.peek_kind() {
-            Some(TokenKind::DigitString) => self.bump().unwrap(),
+        let t = match self.tokenizer.peek_kind() {
+            Some(TokenKind::DigitString) => self.tokenizer.bump().unwrap(),
             _ => {
                 self.emit_expected_token(&[TokenKind::DigitString]);
                 return None;
@@ -432,7 +438,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         let uint = t.try_into_uint(&self.text, &self.arena.big_uints).unwrap();
 
-        let (kind_param, span) = match self.peek_kind() {
+        let (kind_param, span) = match self.tokenizer.peek_kind() {
             Some(TokenKind::Underscore) => {
                 let Spanned {
                     val: kind_param,
@@ -454,9 +460,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn signed_int_literal_constant(&mut self) -> Option<Spanned<SignedIntLiteralConstant<'arena>>> {
-        let sign = match self.peek_kind() {
-            Some(TokenKind::Plus) => Some(Spanned::new(Sign::Plus, self.bump().unwrap().span)),
-            Some(TokenKind::Minus) => Some(Spanned::new(Sign::Minus, self.bump().unwrap().span)),
+        let sign = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Plus) => Some(Spanned::new(
+                Sign::Plus,
+                self.tokenizer.bump().unwrap().span,
+            )),
+            Some(TokenKind::Minus) => Some(Spanned::new(
+                Sign::Minus,
+                self.tokenizer.bump().unwrap().span,
+            )),
             Some(TokenKind::DigitString) => None,
             _ => {
                 self.emit_expected_token(&[
@@ -482,12 +494,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn real_literal_constant(&mut self) -> Option<Spanned<RealLiteralConstant<'arena>>> {
-        if Some(TokenKind::RealLiteralConstant) != self.peek_kind() {
+        if Some(TokenKind::RealLiteralConstant) != self.tokenizer.peek_kind() {
             self.emit_expected_token(&[TokenKind::RealLiteralConstant]);
             return None;
         }
 
-        let t = self.bump().unwrap();
+        let t = self.tokenizer.bump().unwrap();
 
         enum Either {
             Small(u32),
@@ -622,7 +634,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             None
         };
 
-        let kind_param = match self.peek_kind() {
+        let kind_param = match self.tokenizer.peek_kind() {
             Some(TokenKind::Underscore) => self.kind_param(),
             _ => None,
         };
@@ -640,9 +652,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn signed_real_literal_constant(
         &mut self,
     ) -> Option<Spanned<SignedRealLiteralConstant<'arena>>> {
-        let sign = match self.peek_kind() {
-            Some(TokenKind::Plus) => Some(Spanned::new(Sign::Plus, self.bump().unwrap().span)),
-            Some(TokenKind::Minus) => Some(Spanned::new(Sign::Minus, self.bump().unwrap().span)),
+        let sign = match self.tokenizer.peek_kind() {
+            Some(TokenKind::Plus) => Some(Spanned::new(
+                Sign::Plus,
+                self.tokenizer.bump().unwrap().span,
+            )),
+            Some(TokenKind::Minus) => Some(Spanned::new(
+                Sign::Minus,
+                self.tokenizer.bump().unwrap().span,
+            )),
             Some(TokenKind::RealLiteralConstant) => None,
             _ => {
                 self.emit_expected_token(&[
@@ -670,9 +688,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// R724: char-literal-constant
     fn char_literal_constant(&mut self) -> Option<Spanned<CharLiteralConstant<'arena>>> {
         let kind_param = match (
-            self.peek_nth_kind(0),
-            self.peek_nth_kind(1),
-            self.peek_nth_kind(2),
+            self.tokenizer.peek_nth_kind(0),
+            self.tokenizer.peek_nth_kind(1),
+            self.tokenizer.peek_nth_kind(2),
         ) {
             (
                 Some(TokenKind::DigitString),
@@ -690,9 +708,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => None,
         };
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::CharLiteralConstant) => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
 
                 let quote_char = self.text[t.span.start as usize..].chars().next().unwrap();
 
@@ -733,16 +751,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     /// R725: logical-literal-constant
     fn logical_literal_constant(&mut self) -> Option<Spanned<LogicalLiteralConstant<'arena>>> {
-        let (value, start_span) = match self.peek_kind() {
-            Some(TokenKind::True) => (true, self.bump().unwrap().span),
-            Some(TokenKind::False) => (false, self.bump().unwrap().span),
+        let (value, start_span) = match self.tokenizer.peek_kind() {
+            Some(TokenKind::True) => (true, self.tokenizer.bump().unwrap().span),
+            Some(TokenKind::False) => (false, self.tokenizer.bump().unwrap().span),
             _ => {
                 self.emit_expected_token(&[TokenKind::True, TokenKind::False]);
                 return None;
             }
         };
 
-        let kind_param = match self.peek_kind() {
+        let kind_param = match self.tokenizer.peek_kind() {
             Some(TokenKind::Underscore) => Some(self.kind_param()?),
             _ => None,
         };

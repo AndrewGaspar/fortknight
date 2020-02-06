@@ -12,9 +12,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// an error is emitted and the statement is skipped, marking it as unclassifiable.
     pub(super) fn assignment_stmt(&mut self) -> Stmt<'arena> {
         // TODO: This isn't right, but just parsing variable names for now.
-        let designator = match self.peek_kind() {
+        let designator = match self.tokenizer.peek_kind() {
             Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+                let t = self.tokenizer.bump().unwrap();
                 Spanned::new(
                     Designator::ObjectName(
                         t.try_intern_contents(&mut self.interner, &self.text)
@@ -38,9 +38,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             designator.span,
         );
 
-        match self.peek_kind() {
+        match self.tokenizer.peek_kind() {
             Some(TokenKind::Equals) => {
-                self.bump();
+                self.tokenizer.bump();
             }
             _ => {
                 self.emit_expected_token(&[TokenKind::Equals]);

@@ -91,6 +91,20 @@ impl AnalysisEngine {
         );
         self.data.file_data.tokens.push(tokenizer.collect());
 
+        let mut interner = crate::intern::StringInterner::new();
+        let mut arena = parser::classify::ClassifierArena::new();
+
+        let mut classifier = parser::classify::Classifier::new(
+            &parser::lex::TokenizerOptions::default(),
+            file_id,
+            &self.data.file_data.contents.last().unwrap(),
+            &self.diagnostics,
+            &mut interner,
+            &mut arena,
+        );
+
+        while let Some(_) = classifier.next_stmt() {}
+
         if self.options.print_tokens {
             let tokenize_preprocessor = self.data.file_data.file_names[file_id.0 as usize]
                 .extension()

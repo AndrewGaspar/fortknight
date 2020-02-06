@@ -2,18 +2,19 @@ use std::cell::RefCell;
 use std::fmt::Write;
 
 use num_bigint::BigUint;
-use peek_nth::{IteratorExt, PeekableNth};
 use typed_arena::Arena;
 
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode, SemanticErrorCode};
 use crate::index::FileId;
 use crate::intern::InternedName;
-use crate::parser::lex::{KeywordTokenKind, Token, TokenKind, Tokenizer, TokenizerOptions};
+use crate::parser::lex::{KeywordTokenKind, PeekableTokenizer, Token, TokenKind, TokenizerOptions};
 use crate::span::Span;
 
 mod assignment;
 mod block;
+mod expectations;
 mod expressions;
+mod format;
 mod implicit;
 mod import_stmt;
 mod statements;
@@ -58,12 +59,56 @@ impl<'arena> ClassifierArena<'arena> {
     }
 }
 
+struct TokenState<'input> {
+    tokenizer: PeekableTokenizer<'input>,
+    pub(crate) expected_tokens: Vec<TokenKind>,
+}
+
+impl<'input> TokenState<'input> {
+    pub(crate) fn clear_current_state(&mut self) {
+        self.expected_tokens.clear();
+    }
+
+    pub(crate) fn bump(&mut self) -> Option<Token> {
+        self.clear_current_state();
+        self.tokenizer.next()
+    }
+
+    pub(crate) fn peek(&mut self) -> Option<&Token> {
+        self.tokenizer.peek()
+    }
+
+    pub(crate) fn peek_nth(&mut self, n: usize) -> Option<&Token> {
+        self.tokenizer.peek_nth(n)
+    }
+
+    fn peek_kind(&mut self) -> Option<TokenKind> {
+        self.tokenizer.peek().map(|t| t.kind)
+    }
+
+    pub(crate) fn peek_nth_kind(&mut self, n: usize) -> Option<TokenKind> {
+        self.tokenizer.peek_nth(n).map(|t| t.kind)
+    }
+
+    pub(crate) fn expect_token(&mut self, kind: TokenKind, expected: TokenKind) -> bool {
+        if kind == expected {
+            true
+        } else {
+            self.expected_tokens.push(expected);
+            false
+        }
+    }
+
+    pub(crate) fn push_expected(&mut self, expected: TokenKind) {
+        self.expected_tokens.push(expected);
+    }
+}
+
 pub struct Classifier<'input, 'arena> {
     file_id: FileId,
     text: &'input str,
     diagnostics: &'input RefCell<DiagnosticSink>,
-    tokenizer: Tokenizer<'input>,
-    peeked_tokenizer: Option<PeekableNth<Tokenizer<'input>>>,
+    tokenizer: TokenState<'input>,
     interner: &'input mut crate::intern::StringInterner,
     arena: &'arena ClassifierArena<'arena>,
 }
@@ -81,41 +126,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             file_id,
             text,
             diagnostics,
-            tokenizer: Tokenizer::new(options, file_id, text, diagnostics),
-            peeked_tokenizer: None,
+            tokenizer: TokenState {
+                tokenizer: PeekableTokenizer::new(options, file_id, text, diagnostics),
+                expected_tokens: Vec::new(),
+            },
             interner,
             arena,
         }
-    }
-
-    fn bump(&mut self) -> Option<Token> {
-        self.peeked_tokenizer = None;
-
-        self.tokenizer.next()
-    }
-
-    fn peeked_tokenizer(&mut self) -> &mut PeekableNth<Tokenizer<'input>> {
-        if self.peeked_tokenizer.is_none() {
-            self.peeked_tokenizer = Some(self.tokenizer.clone().peekable_nth());
-        }
-
-        self.peeked_tokenizer.as_mut().unwrap()
-    }
-
-    fn peek(&mut self) -> Option<&Token> {
-        self.peeked_tokenizer().peek()
-    }
-
-    fn peek_nth(&mut self, n: usize) -> Option<&Token> {
-        self.peeked_tokenizer().peek_nth(n)
-    }
-
-    fn peek_kind(&mut self) -> Option<TokenKind> {
-        self.peek().map(|t| t.kind)
-    }
-
-    fn peek_nth_kind(&mut self, n: usize) -> Option<TokenKind> {
-        self.peek_nth(n).map(|t| t.kind)
     }
 
     fn emit_error_span(&mut self, err: ParserErrorCode, span: Span, msg: &str) {
@@ -165,18 +182,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     where
         MakeEndConstruct: FnOnce(Option<Spanned<InternedName>>) -> StmtKind<'arena>,
     {
-        let (name, end) = match self.peek() {
-            Some(t) if t.is_name() => {
-                let t = *t;
-                (
-                    Some(Spanned::new(
-                        t.try_intern_contents(&mut self.interner, &self.text)
-                            .unwrap(),
-                        t.span,
-                    )),
-                    self.bump().unwrap().span.end,
-                )
-            }
+        let (name, end) = match self.tokenizer.peek() {
+            Some(t) if t.is_name() => (
+                Some(Spanned::new(
+                    t.try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                    t.span,
+                )),
+                self.tokenizer.bump().unwrap().span.end,
+            ),
             _ => (None, start_span.end),
         };
 
@@ -193,6 +207,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn emit_expected_token(&mut self, tokens: &[TokenKind]) {
+        debug_assert!(!tokens.is_empty());
+
         let mut msg = if tokens.len() == 1 {
             format!("expected {}", tokens[0].friendly_name())
         } else if tokens.len() == 2 {
@@ -215,7 +231,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             msg
         };
 
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(t) => {
                 write!(&mut msg, ", found {}", t.friendly_name()).unwrap();
                 let span = t.span.clone();
@@ -238,8 +254,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         };
     }
 
-    fn expected_token(&mut self, tokens: &[TokenKind], start_span: &Span) -> Stmt<'arena> {
-        self.emit_expected_token(tokens);
+    fn expect_token(&mut self, kind: TokenKind, expected: TokenKind) -> bool {
+        self.tokenizer.expect_token(kind, expected)
+    }
+
+    fn check(&mut self, expected: TokenKind) -> bool {
+        if let Some(k) = self.tokenizer.peek_kind() {
+            self.expect_token(k, expected)
+        } else {
+            self.tokenizer.push_expected(expected);
+            false
+        }
+    }
+
+    fn emit_unexpected_token(&mut self) {
+        let tokens: Vec<_> = self.tokenizer.expected_tokens.iter().cloned().collect();
+        self.emit_expected_token(&tokens[..]);
+    }
+
+    fn unexpected_token(&mut self, start_span: &Span) -> Stmt<'arena> {
+        self.emit_unexpected_token();
 
         match self.take_until_eos() {
             Some(span) => self.unclassifiable(start_span.start, span.end),
@@ -267,10 +301,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         F: FnMut(Option<&Token>) -> TakeUntil,
     {
         loop {
-            return match self.peek() {
+            return match self.tokenizer.peek() {
                 Some(t) => match terminate(Some(t)) {
                     TakeUntil::Continue => {
-                        self.bump();
+                        self.tokenizer.bump();
                         continue;
                     }
                     TakeUntil::Stop => Ok(t.span.end),
@@ -291,12 +325,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         let mut depth = 0;
         let mut idx = start_idx;
 
-        if Some(TokenKind::LeftParen) != self.peek_nth_kind(idx) {
+        if Some(TokenKind::LeftParen) != self.tokenizer.peek_nth_kind(idx) {
             return None;
         }
 
         loop {
-            match self.peek_nth_kind(idx) {
+            match self.tokenizer.peek_nth_kind(idx) {
                 Some(TokenKind::LeftParen) => {
                     depth += 1;
                 }
@@ -320,8 +354,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn take_until_eos(&mut self) -> Option<Span> {
-        let mut last_seen: Option<Span> = self.peek().map(|t| t.span);
-        for t in &mut self.tokenizer {
+        self.tokenizer.clear_current_state();
+        let mut last_seen: Option<Span> = self.tokenizer.peek().map(|t| t.span);
+        while let Some(t) = self.tokenizer.bump() {
             if Self::is_eos(&t) {
                 return last_seen;
             }
@@ -333,15 +368,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn expect_eos(&mut self) {
-        let start = if let Some(t) = self.peek() {
+        let start = if let Some(t) = self.tokenizer.peek() {
             t.span.start
         } else {
             return;
         };
 
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(t) if Self::is_eos(t) => {
-                self.bump();
+                self.tokenizer.bump();
                 return;
             }
             _ => {
@@ -357,7 +392,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn program(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let (name, end) = match self.peek() {
+        let (name, end) = match self.tokenizer.peek() {
             Some(t) if t.is_name() => {
                 let t = *t;
                 (
@@ -366,7 +401,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             .unwrap(),
                         t.span,
                     )),
-                    self.bump().unwrap().span.end,
+                    self.tokenizer.bump().unwrap().span.end,
                 )
             }
             _ => (None, start_span.end),
@@ -427,61 +462,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses from a statement starting with 'module'. Can be a procedure-stmt, module-stmt,
     /// function-stmt, or subroutine-stmt
     fn module(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let (name, end) = match self.peek() {
-            // Don't consume module keyword for procedures - let the delegated routine parse it.
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Procedure),
-                span,
-            }) => {
-                let span = span.clone();
-                return self.module_procedure(&Span {
-                    file_id: self.file_id,
-                    start: start_span.start,
-                    end: span.end,
-                });
-            }
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Function),
-                ..
-            }) => return self.function(start_span),
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Subroutine),
-                ..
-            }) => return self.subroutine(start_span),
-            Some(t) if t.is_maybe_routine_prefix() => {
-                return self.subroutine_or_function(start_span);
-            }
-            Some(t) if t.is_name() => {
-                let t = *t;
-                (
-                    Spanned::new(
-                        t.try_intern_contents(&mut self.interner, &self.text)
-                            .unwrap(),
-                        t.span,
-                    ),
-                    self.bump().unwrap().span.end,
-                )
-            }
-            _ => {
-                return self.expected_token(
-                    &[
-                        TokenKind::Keyword(KeywordTokenKind::Procedure),
-                        TokenKind::Keyword(KeywordTokenKind::Function),
-                        TokenKind::Keyword(KeywordTokenKind::Subroutine),
-                        TokenKind::Keyword(KeywordTokenKind::Type),
-                        TokenKind::Keyword(KeywordTokenKind::Class),
-                        TokenKind::Keyword(KeywordTokenKind::Integer),
-                        TokenKind::Keyword(KeywordTokenKind::Real),
-                        TokenKind::Keyword(KeywordTokenKind::Double),
-                        TokenKind::Keyword(KeywordTokenKind::DoublePrecision),
-                        TokenKind::Keyword(KeywordTokenKind::Complex),
-                        TokenKind::Keyword(KeywordTokenKind::Character),
-                        TokenKind::Keyword(KeywordTokenKind::Logical),
-                        TokenKind::Name,
-                    ],
-                    start_span,
-                );
-            }
+        let (name, end) = if self.check(TokenKind::Keyword(KeywordTokenKind::Procedure)) {
+            return self.module_procedure(start_span);
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Function)) {
+            return self.function(start_span);
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Subroutine)) {
+            return self.subroutine(start_span);
+        } else if self.check_maybe_routine_prefix() {
+            return self.subroutine_or_function(start_span);
+        } else if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
+            (
+                Spanned::new(
+                    t.try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                    t.span,
+                ),
+                t.span.end,
+            )
+        } else {
+            return self.unexpected_token(start_span);
         };
 
         self.expect_eos();
@@ -503,55 +503,38 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     /// Parses a submodule statement
     fn submodule(&mut self, start_span: &Span) -> Stmt<'arena> {
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::LeftParen,
-                ..
-            }) => self.bump().unwrap(),
-            _ => {
-                return self.expected_token(&[TokenKind::LeftParen], start_span);
-            }
-        };
+        if self.check(TokenKind::LeftParen) {
+            self.tokenizer.bump();
+        } else {
+            return self.unexpected_token(start_span);
+        }
 
         // Parse the parent identifier.
-        let ancestor_module_name = match self.peek() {
-            Some(t) if t.is_name() => self
+        let ancestor_module_name = if self.check_name() {
+            self.tokenizer
                 .bump()
                 .unwrap()
                 .try_intern_contents(&mut self.interner, &self.text)
-                .unwrap(),
-            _ => {
-                return self.expected_token(&[TokenKind::Name], start_span);
-            }
+                .unwrap()
+        } else {
+            return self.unexpected_token(start_span);
         };
 
-        let parent_submodule_name = match self.peek() {
-            Some(Token {
-                kind: TokenKind::Colon,
-                ..
-            }) => {
-                self.bump();
-                Some(match self.peek() {
-                    Some(t) if t.is_name() => self
-                        .bump()
-                        .unwrap()
-                        .try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    _ => {
-                        return self.expected_token(&[TokenKind::Name], start_span);
-                    }
-                })
-            }
-            Some(Token {
-                kind: TokenKind::RightParen,
-                ..
-            }) => {
-                // Don't consume yet - just return parent submodule name
-                None
-            }
-            _ => {
-                return self.expected_token(&[TokenKind::Colon, TokenKind::RightParen], start_span);
-            }
+        let parent_submodule_name = if self.check(TokenKind::Colon) {
+            self.tokenizer.bump();
+            Some(if self.check_name() {
+                self.tokenizer
+                    .bump()
+                    .unwrap()
+                    .try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap()
+            } else {
+                return self.unexpected_token(start_span);
+            })
+        } else if self.check(TokenKind::RightParen) {
+            None
+        } else {
+            return self.unexpected_token(start_span);
         };
 
         let parent_identifier = ParentIdentifier {
@@ -559,31 +542,24 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             parent_submodule_name,
         };
 
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::RightParen,
-                ..
-            }) => self.bump(),
-            _ => {
-                return self.expected_token(&[TokenKind::RightParen], start_span);
-            }
-        };
+        if self.check(TokenKind::RightParen) {
+            self.tokenizer.bump();
+        } else {
+            return self.unexpected_token(start_span);
+        }
 
-        let name = match self.peek() {
-            Some(t) if t.is_name() => {
-                let t = self.bump().unwrap();
+        let name = if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
 
-                let span = t.span;
+            let span = t.span;
 
-                Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    span,
-                )
-            }
-            _ => {
-                return self.expected_token(&[TokenKind::Name], start_span);
-            }
+            Spanned::new(
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+                span,
+            )
+        } else {
+            return self.unexpected_token(start_span);
         };
 
         self.expect_eos();
@@ -608,43 +584,31 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn end(&mut self, start_span: &Span) -> Stmt<'arena> {
-        let token = match self.peek() {
-            Some(token) => token,
-            None => {
-                return Stmt {
-                    kind: StmtKind::End,
-                    span: *start_span,
-                }
+        if self.tokenizer.peek().is_none() {
+            Stmt {
+                kind: StmtKind::End,
+                span: *start_span,
             }
-        };
-
-        match token.kind {
-            TokenKind::Keyword(KeywordTokenKind::Program) => {
-                self.bump();
-                self.end_program(start_span)
-            }
-            TokenKind::Keyword(KeywordTokenKind::Module) => {
-                self.bump();
-                self.end_module(start_span)
-            }
-            TokenKind::Keyword(KeywordTokenKind::Submodule) => {
-                self.bump();
-                self.end_submodule(start_span)
-            }
-            TokenKind::Keyword(KeywordTokenKind::Block) => {
-                let span = self.bump().unwrap().span;
-                self.stmt_from_end_block(start_span.concat(span))
-            }
-            TokenKind::Keyword(KeywordTokenKind::BlockData) => {
-                let span = self.bump().unwrap().span;
-                self.stmt_from_end_block_data(start_span.concat(span))
-            }
-            _ => {
-                self.expect_eos();
-                Stmt {
-                    kind: StmtKind::End,
-                    span: *start_span,
-                }
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Program)) {
+            self.tokenizer.bump();
+            self.end_program(start_span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Module)) {
+            self.tokenizer.bump();
+            self.end_module(start_span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Submodule)) {
+            self.tokenizer.bump();
+            self.end_submodule(start_span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Block)) {
+            let span = self.tokenizer.bump().unwrap().span;
+            self.stmt_from_end_block(start_span.concat(span))
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::BlockData)) {
+            let span = self.tokenizer.bump().unwrap().span;
+            self.stmt_from_end_block_data(start_span.concat(span))
+        } else {
+            self.expect_eos();
+            Stmt {
+                kind: StmtKind::End,
+                span: *start_span,
             }
         }
     }
@@ -660,11 +624,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
+        // Check if there are any more tokens and return None if not.
+        self.tokenizer.peek()?;
+
         // Look ahead for assignments
         // TODO: This just looks for a variable name then =, which is incomplete. Need to support
         // array elements, array sections, substrings, structure components, etc.
-        match self.peek_nth_kind(0) {
-            Some(t) if t.is_name() => match self.peek_nth_kind(1) {
+        match self.tokenizer.peek_nth_kind(0) {
+            Some(t) if t.is_name() => match self.tokenizer.peek_nth_kind(1) {
                 Some(TokenKind::Equals) => {
                     return Some(self.assignment_stmt());
                 }
@@ -673,33 +640,65 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             _ => {}
         };
 
-        let token = self.bump()?;
-
-        let stmt = match token.kind {
-            TokenKind::Keyword(KeywordTokenKind::End) => self.end(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Implicit) => self.implicit_stmt(token.span),
-            TokenKind::Keyword(KeywordTokenKind::Import) => self.import_statement(token.span),
-            TokenKind::Keyword(KeywordTokenKind::Program) => self.program(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::EndProgram) => self.end_program(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Module) => self.module(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::EndModule) => self.end_module(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Submodule) => self.submodule(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::EndSubmodule) => self.end_submodule(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Use) => self.use_statement(&token.span),
-            TokenKind::Keyword(KeywordTokenKind::Contains) => self.contains(token.span),
-            TokenKind::Keyword(KeywordTokenKind::Block) => self.stmt_from_block(token.span),
-            TokenKind::Keyword(KeywordTokenKind::BlockData) => {
-                self.stmt_from_block_data(token.span)
-            }
-            TokenKind::Keyword(KeywordTokenKind::EndBlock) => self.stmt_from_end_block(token.span),
-            TokenKind::Keyword(KeywordTokenKind::EndBlockData) => {
-                self.stmt_from_end_block_data(token.span)
-            }
-            t if t.is_eos() => Stmt {
+        let stmt = if self.check(TokenKind::Keyword(KeywordTokenKind::End)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.end(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Implicit)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.implicit_stmt(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Import)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.import_statement(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Program)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.program(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::EndProgram)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.end_program(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Module)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.module(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::EndModule)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.end_module(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Submodule)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.submodule(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::EndSubmodule)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.end_submodule(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Use)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.use_statement(&token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Contains)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.contains(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Block)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.stmt_from_block(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::BlockData)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.stmt_from_block_data(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::EndBlock)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.stmt_from_end_block(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::EndBlockData)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.stmt_from_end_block_data(token.span)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Format)) {
+            let token = self.tokenizer.bump().unwrap();
+            self.format(&token.span)
+        } else if self.check_eos() {
+            let token = self.tokenizer.bump().unwrap();
+            Stmt {
                 kind: StmtKind::Empty,
                 span: token.span,
-            },
-            _ => self.unclassifiable(token.span.start, token.span.end),
+            }
+        } else if self.tokenizer.peek().is_none() {
+            return None;
+        } else {
+            let token = self.tokenizer.bump().unwrap();
+            self.unexpected_token(&token.span)
         };
 
         Some(stmt)
@@ -725,9 +724,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         // bumps the final token so that we're either ready to parse the next only or the next
         // statement
-        self.bump();
+        self.tokenizer.bump();
 
-        match self.peek() {
+        match self.tokenizer.peek() {
             Some(t) if Self::is_eos(t) => None,
             None => None,
             // Consume the comma so we're ready to parse the next potential "only"
