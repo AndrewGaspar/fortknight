@@ -45,19 +45,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             .arena
             .implicit_specs
             .alloc_extend(std::iter::once(spec).chain(std::iter::from_fn(|| {
-                match self.tokenizer.peek_kind() {
-                    Some(TokenKind::Comma) => {
-                        self.tokenizer.bump();
-                    }
-                    Some(t) if t.is_eos() => {
-                        return None;
-                    }
-                    None => return None,
-                    _ => {
-                        error_encountered = true;
-                        self.emit_expected_token(&eos_or(&[TokenKind::Comma]));
-                        return None;
-                    }
+                if self.check(TokenKind::Comma) {
+                    self.tokenizer.bump();
+                } else if self.check_eos() {
+                    return None;
+                } else {
+                    error_encountered = true;
+                    self.emit_unexpected_token();
+                    return None;
                 };
 
                 match self.implicit_spec() {
@@ -85,21 +80,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses an implicit-stmt after consuming `IMPLICIT NONE`
     fn implicit_none_stmt(&mut self, implicit_none_span: Span) -> Stmt<'arena> {
-        let has_spec_list = match self.tokenizer.peek().map(|t| t.kind) {
-            Some(TokenKind::LeftParen) => {
-                self.tokenizer.bump();
-                true
-            }
-            Some(tk) if tk.is_eos() => false,
-            None => false,
-            _ => {
-                self.emit_expected_token(&eos_or(&[TokenKind::LeftParen]));
+        let has_spec_list = if self.check(TokenKind::LeftParen) {
+            self.tokenizer.bump();
+            true
+        } else if self.check_eos() {
+            false
+        } else {
+            self.emit_unexpected_token();
+            self.take_until_eos();
 
-                self.take_until_eos();
-
-                // act as if it's a bare `implicit none`
-                false
-            }
+            // act as if it's a bare `implicit none`
+            false
         };
 
         if !has_spec_list {
@@ -117,78 +108,60 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         let mut is_first = true;
         let end_span = loop {
-            match self.tokenizer.peek().map(|t| t.kind) {
-                Some(TokenKind::Keyword(KeywordTokenKind::External)) => {
-                    let span = self.tokenizer.bump().unwrap().span;
+            if self.check(TokenKind::Keyword(KeywordTokenKind::External)) {
+                let span = self.tokenizer.bump().unwrap().span;
 
-                    if has_external {
-                        self.emit_semantic_error(
-                            SemanticErrorCode::ImplicitNoneDuplicateSpec,
-                            span.start,
-                            span.end,
-                            "The EXTERNAL spec was specified multiple times. IMPLICIT NONE specs \
-                             may only be specified once.",
-                        );
-                    }
-
-                    has_external = true;
+                if has_external {
+                    self.emit_semantic_error(
+                        SemanticErrorCode::ImplicitNoneDuplicateSpec,
+                        span.start,
+                        span.end,
+                        "The EXTERNAL spec was specified multiple times. IMPLICIT NONE specs \
+                            may only be specified once.",
+                    );
                 }
-                Some(TokenKind::Keyword(KeywordTokenKind::Type)) => {
-                    let span = self.tokenizer.bump().unwrap().span;
 
-                    if has_type {
-                        self.emit_semantic_error(
-                            SemanticErrorCode::ImplicitNoneDuplicateSpec,
-                            span.start,
-                            span.end,
-                            "The TYPE spec was specified multiple times. IMPLICIT NONE specs \
-                             may only be specified once.",
-                        );
-                    }
+                has_external = true;
+            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Type)) {
+                let span = self.tokenizer.bump().unwrap().span;
 
-                    has_type = true;
+                if has_type {
+                    self.emit_semantic_error(
+                        SemanticErrorCode::ImplicitNoneDuplicateSpec,
+                        span.start,
+                        span.end,
+                        "The TYPE spec was specified multiple times. IMPLICIT NONE specs \
+                            may only be specified once.",
+                    );
                 }
-                Some(TokenKind::RightParen) if is_first => {
-                    break self.tokenizer.bump().unwrap().span
-                }
-                _ => {
-                    if is_first {
-                        self.emit_expected_token(&[
-                            TokenKind::Keyword(KeywordTokenKind::External),
-                            TokenKind::Keyword(KeywordTokenKind::Type),
-                            TokenKind::RightParen,
-                        ]);
-                    } else {
-                        self.emit_expected_token(&[
-                            TokenKind::Keyword(KeywordTokenKind::External),
-                            TokenKind::Keyword(KeywordTokenKind::Type),
-                        ]);
-                    }
 
-                    break self.take_until_eos().unwrap_or(Span {
-                        file_id: self.file_id,
-                        start: self.text_len(),
-                        end: self.text_len(),
-                    });
-                }
+                has_type = true;
+            } else if is_first && self.check(TokenKind::RightParen) {
+                break self.tokenizer.bump().unwrap().span;
+            } else {
+                self.emit_unexpected_token();
+
+                break self.take_until_eos().unwrap_or(Span {
+                    file_id: self.file_id,
+                    start: self.text_len(),
+                    end: self.text_len(),
+                });
             };
 
             is_first = false;
 
-            match self.tokenizer.peek().map(|t| t.kind) {
-                Some(TokenKind::Comma) => {
-                    self.tokenizer.bump();
-                }
-                Some(TokenKind::RightParen) => break self.tokenizer.bump().unwrap().span,
-                _ => {
-                    self.emit_expected_token(&[TokenKind::Comma, TokenKind::RightParen]);
+            if self.check(TokenKind::Comma) {
+                self.tokenizer.bump();
+            } else if self.check(TokenKind::RightParen) {
+                break self.tokenizer.bump().unwrap().span;
+            } else {
+                self.emit_unexpected_token();
 
-                    break self.take_until_eos().unwrap_or(Span {
-                        file_id: self.file_id,
-                        start: self.text_len(),
-                        end: self.text_len(),
-                    });
-                }
+                break self.take_until_eos().unwrap_or(Span {
+                    file_id: self.file_id,
+                    start: self.text_len(),
+                    end: self.text_len(),
+                });
             };
         };
 
@@ -209,34 +182,31 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     fn implicit_spec(&mut self) -> Option<Spanned<ImplicitSpec<'arena>>> {
         let declaration_type_spec = if self.implicit_spec_type_lookahead_should_skip_kind_selector()
         {
-            let t = self.tokenizer.bump().unwrap();
-            // bump since we know there must be following token
-            let intrinsic = match t.kind {
-                TokenKind::Keyword(KeywordTokenKind::Integer) => {
-                    IntrinsicTypeSpec::Integer(IntegerTypeSpec(None))
-                }
-                TokenKind::Keyword(KeywordTokenKind::Real) => IntrinsicTypeSpec::Real(None),
-                TokenKind::Keyword(KeywordTokenKind::Complex) => IntrinsicTypeSpec::Complex(None),
-                TokenKind::Keyword(KeywordTokenKind::Character) => {
-                    IntrinsicTypeSpec::Character(None)
-                }
-                TokenKind::Keyword(KeywordTokenKind::Logical) => IntrinsicTypeSpec::Logical(None),
-                _ => panic!("Internal compiler error: Expected one of the intrinsic type specs"),
+            let intrinsic = if self.check(TokenKind::Keyword(KeywordTokenKind::Integer)) {
+                IntrinsicTypeSpec::Integer(IntegerTypeSpec(None))
+            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Real)) {
+                IntrinsicTypeSpec::Real(None)
+            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Complex)) {
+                IntrinsicTypeSpec::Complex(None)
+            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Character)) {
+                IntrinsicTypeSpec::Character(None)
+            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Logical)) {
+                IntrinsicTypeSpec::Logical(None)
+            } else {
+                panic!("Internal compiler error: Expected one of the intrinsic type specs")
             };
 
+            let t = self.tokenizer.bump().unwrap();
             Spanned::new(DeclarationTypeSpec::Intrinsic(intrinsic), t.span)
         } else {
             self.declaration_type_spec()?
         };
 
-        match self.tokenizer.peek_kind() {
-            Some(TokenKind::LeftParen) => {
-                self.tokenizer.bump();
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::LeftParen]);
-                return None;
-            }
+        if self.check(TokenKind::LeftParen) {
+            self.tokenizer.bump();
+        } else {
+            self.emit_unexpected_token();
+            return None;
         }
 
         let letter_spec = self.letter_spec()?.val;
@@ -245,26 +215,23 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             self.arena
                 .letter_specs
                 .alloc_extend(std::iter::once(letter_spec).chain(std::iter::from_fn(|| {
-                    match self.tokenizer.peek_kind() {
-                        Some(TokenKind::Comma) => {
-                            self.tokenizer.bump();
-                        }
-                        Some(TokenKind::RightParen) => return None,
-                        _ => {
-                            self.emit_expected_token(&[TokenKind::Comma, TokenKind::RightParen]);
-                            return None;
-                        }
-                    };
+                    if self.check(TokenKind::Comma) {
+                        self.tokenizer.bump();
+                    } else if self.check(TokenKind::RightParen) {
+                        return None;
+                    } else {
+                        self.emit_unexpected_token();
+                        return None;
+                    }
 
                     Some(self.letter_spec()?.val)
                 })));
 
-        let end_span = match self.tokenizer.peek_kind() {
-            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-            _ => {
-                // expected token already emitted - return
-                return None;
-            }
+        let end_span = if self.check(TokenKind::RightParen) {
+            self.tokenizer.bump().unwrap().span
+        } else {
+            // expected token already emitted - return
+            return None;
         };
 
         Some(Spanned::new(
@@ -315,19 +282,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             }
         };
 
-        match self.tokenizer.peek_kind() {
-            Some(TokenKind::Minus) => {
-                self.tokenizer.bump();
-            }
-            _ => {
-                return Some(Spanned::new(
-                    LetterSpec {
-                        start: letter,
-                        end: None,
-                    },
-                    start_span,
-                ))
-            }
+        if self.check(TokenKind::Minus) {
+            self.tokenizer.bump();
+        } else {
+            return Some(Spanned::new(
+                LetterSpec {
+                    start: letter,
+                    end: None,
+                },
+                start_span,
+            ));
         }
 
         let (end_letter, end_span) = match self.tokenizer.peek_kind() {
