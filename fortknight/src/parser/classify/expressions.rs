@@ -73,13 +73,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
                 let expr = self.expr()?.val;
 
-                let close_span = match self.tokenizer.peek_kind() {
-                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::RightParen]);
-
-                        return None;
-                    }
+                let close_span = if self.check(TokenKind::RightParen) {
+                    self.tokenizer.bump().unwrap().span
+                } else {
+                    return None;
                 };
 
                 return Some(Spanned::new(expr, start_span.concat(close_span)));
