@@ -275,6 +275,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         tokens.sort();
         tokens.dedup();
         self.emit_expected_token(&tokens[..]);
+        self.tokenizer.expected_tokens.clear();
     }
 
     fn unexpected_token(&mut self, start_span: &Span) -> Stmt<'arena> {

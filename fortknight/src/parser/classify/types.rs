@@ -11,24 +11,24 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parse a type-param-value form start
     fn type_param_value(&mut self) -> Option<Spanned<TypeParamValue<'arena>>> {
-        match self.tokenizer.peek_kind() {
-            Some(TokenKind::Star) => Some(Spanned::new(
+        if self.check(TokenKind::Star) {
+            Some(Spanned::new(
                 TypeParamValue::Star,
                 self.tokenizer.bump().unwrap().span,
-            )),
-            Some(TokenKind::Colon) => Some(Spanned::new(
+            ))
+        } else if self.check(TokenKind::Colon) {
+            Some(Spanned::new(
                 TypeParamValue::Colon,
                 self.tokenizer.bump().unwrap().span,
-            )),
-            _ => {
-                // TODO: Check for expression start and emit an "unexpected token" error if it
-                // couldn't possibly be an expression.
-                let expr = self.expr()?;
-                Some(Spanned::new(
-                    TypeParamValue::ScalarIntExpr(self.arena.expressions.alloc(expr.val)),
-                    expr.span,
-                ))
-            }
+            ))
+        } else {
+            // TODO: Check for expression start and emit an "unexpected token" error if it
+            // couldn't possibly be an expression.
+            let expr = self.expr()?;
+            Some(Spanned::new(
+                TypeParamValue::ScalarIntExpr(self.arena.expressions.alloc(expr.val)),
+                expr.span,
+            ))
         }
     }
 
@@ -37,124 +37,104 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a declaration-type-spec from the start of the type. Returns None if the parse fails -
     /// does not consume the failure token.
     pub(super) fn declaration_type_spec(&mut self) -> Option<Spanned<DeclarationTypeSpec<'arena>>> {
-        match self.tokenizer.peek().map(|t| t.kind) {
-            Some(t) if t.is_intrinsic_type_spec_start() => {
-                let spec = self.intrinsic_type_spec()?;
-                Some(Spanned::new(
-                    DeclarationTypeSpec::Intrinsic(spec.val),
-                    spec.span,
-                ))
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Type)) => {
-                let start_span = self.tokenizer.bump().unwrap().span;
+        if self.check_intrinsic_type() {
+            let spec = self.intrinsic_type_spec()?;
+            Some(Spanned::new(
+                DeclarationTypeSpec::Intrinsic(spec.val),
+                spec.span,
+            ))
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Type)) {
+            let start_span = self.tokenizer.bump().unwrap().span;
 
-                match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(TokenKind::LeftParen) => {
-                        self.tokenizer.bump().unwrap();
-                    }
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::LeftParen]);
-                        return None;
-                    }
-                };
-
-                enum Either<'a> {
-                    Intrinsic(Spanned<IntrinsicTypeSpec<'a>>),
-                    Derived(DerivedTypeSpec<'a>),
-                    Wildcard,
-                };
-
-                let type_spec = match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(t) if t.is_intrinsic_type_spec_start() => {
-                        Either::Intrinsic(self.intrinsic_type_spec()?)
-                    }
-                    Some(t) if t.is_name() => Either::Derived(self.derived_type_spec()?.val),
-                    Some(TokenKind::Star) => {
-                        self.tokenizer.bump();
-                        Either::Wildcard
-                    }
-                    _ => {
-                        self.emit_expected_token(&intrinsic_type_spec_or(&[TokenKind::Name]));
-                        return None;
-                    }
-                };
-
-                let end_span = match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::RightParen]);
-                        return None;
-                    }
-                };
-
-                let span = start_span.concat(end_span);
-
-                match type_spec {
-                    Either::Intrinsic(intrinsic) => Some(Spanned::new(
-                        DeclarationTypeSpec::TypeIntrinsic(intrinsic.val),
-                        span,
-                    )),
-                    Either::Derived(derived) => Some(Spanned::new(
-                        DeclarationTypeSpec::TypeDerived(derived),
-                        span,
-                    )),
-                    Either::Wildcard => Some(Spanned::new(DeclarationTypeSpec::TypeWildcard, span)),
-                }
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Class)) => {
-                let start_span = self.tokenizer.bump().unwrap().span;
-
-                match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(TokenKind::LeftParen) => {
-                        self.tokenizer.bump().unwrap();
-                    }
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::LeftParen]);
-                        return None;
-                    }
-                };
-
-                enum Either<'a> {
-                    Derived(DerivedTypeSpec<'a>),
-                    Wildcard,
-                };
-
-                let type_spec = match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(t) if t.is_name() => Either::Derived(self.derived_type_spec()?.val),
-                    Some(TokenKind::Star) => {
-                        self.tokenizer.bump();
-                        Either::Wildcard
-                    }
-                    _ => {
-                        self.emit_expected_token(&intrinsic_type_spec_or(&[TokenKind::Name]));
-                        return None;
-                    }
-                };
-
-                let end_span = match self.tokenizer.peek().map(|t| t.kind) {
-                    Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::RightParen]);
-                        return None;
-                    }
-                };
-
-                let span = start_span.concat(end_span);
-
-                match type_spec {
-                    Either::Derived(derived) => Some(Spanned::new(
-                        DeclarationTypeSpec::ClassDerived(derived),
-                        span,
-                    )),
-                    Either::Wildcard => {
-                        Some(Spanned::new(DeclarationTypeSpec::ClassWildcard, span))
-                    }
-                }
-            }
-            _ => {
-                self.emit_expected_token(&declaration_type_spec_or(&[]));
+            if self.check(TokenKind::LeftParen) {
+                self.tokenizer.bump().unwrap();
+            } else {
+                self.emit_unexpected_token();
                 return None;
             }
+
+            enum Either<'a> {
+                Intrinsic(Spanned<IntrinsicTypeSpec<'a>>),
+                Derived(DerivedTypeSpec<'a>),
+                Wildcard,
+            };
+
+            let type_spec = if self.check_intrinsic_type() {
+                Either::Intrinsic(self.intrinsic_type_spec()?)
+            } else if self.check_name() {
+                Either::Derived(self.derived_type_spec()?.val)
+            } else if self.check(TokenKind::Star) {
+                self.tokenizer.bump();
+                Either::Wildcard
+            } else {
+                self.emit_unexpected_token();
+                return None;
+            };
+
+            let end_span = if self.check(TokenKind::RightParen) {
+                self.tokenizer.bump().unwrap().span
+            } else {
+                self.emit_unexpected_token();
+                return None;
+            };
+
+            let span = start_span.concat(end_span);
+
+            match type_spec {
+                Either::Intrinsic(intrinsic) => Some(Spanned::new(
+                    DeclarationTypeSpec::TypeIntrinsic(intrinsic.val),
+                    span,
+                )),
+                Either::Derived(derived) => Some(Spanned::new(
+                    DeclarationTypeSpec::TypeDerived(derived),
+                    span,
+                )),
+                Either::Wildcard => Some(Spanned::new(DeclarationTypeSpec::TypeWildcard, span)),
+            }
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Class)) {
+            let start_span = self.tokenizer.bump().unwrap().span;
+
+            if self.check(TokenKind::LeftParen) {
+                self.tokenizer.bump().unwrap();
+            } else {
+                self.emit_unexpected_token();
+                return None;
+            }
+
+            enum Either<'a> {
+                Derived(DerivedTypeSpec<'a>),
+                Wildcard,
+            };
+
+            let type_spec = if self.check_name() {
+                Either::Derived(self.derived_type_spec()?.val)
+            } else if self.check(TokenKind::Star) {
+                self.tokenizer.bump();
+                Either::Wildcard
+            } else {
+                self.emit_unexpected_token();
+                return None;
+            };
+
+            let end_span = if self.check(TokenKind::RightParen) {
+                self.tokenizer.bump().unwrap().span
+            } else {
+                self.emit_unexpected_token();
+                return None;
+            };
+
+            let span = start_span.concat(end_span);
+
+            match type_spec {
+                Either::Derived(derived) => Some(Spanned::new(
+                    DeclarationTypeSpec::ClassDerived(derived),
+                    span,
+                )),
+                Either::Wildcard => Some(Spanned::new(DeclarationTypeSpec::ClassWildcard, span)),
+            }
+        } else {
+            self.emit_unexpected_token();
+            return None;
         }
     }
 
@@ -163,26 +143,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an intrinsic type spec from its start. Returns None if the parse fails and does not
     /// consume the failing token.
     fn intrinsic_type_spec(&mut self) -> Option<Spanned<IntrinsicTypeSpec<'arena>>> {
-        match self.tokenizer.peek().map(|t| t.kind) {
-            Some(TokenKind::Keyword(KeywordTokenKind::Integer)) => {
-                self.type_spec(KeywordTokenKind::Integer)
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Real)) => {
-                self.type_spec(KeywordTokenKind::Real)
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Complex)) => {
-                self.type_spec(KeywordTokenKind::Complex)
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Character)) => {
-                self.type_spec(KeywordTokenKind::Character)
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Logical)) => {
-                self.type_spec(KeywordTokenKind::Logical)
-            }
-            Some(TokenKind::Keyword(KeywordTokenKind::Double)) => match self
-                .tokenizer
-                .peek_nth_kind(1)
-            {
+        if self.check(TokenKind::Keyword(KeywordTokenKind::Integer)) {
+            self.type_spec(KeywordTokenKind::Integer)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Real)) {
+            self.type_spec(KeywordTokenKind::Real)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Complex)) {
+            self.type_spec(KeywordTokenKind::Complex)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Character)) {
+            self.type_spec(KeywordTokenKind::Character)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Logical)) {
+            self.type_spec(KeywordTokenKind::Logical)
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Double)) {
+            match self.tokenizer.peek_nth_kind(1) {
                 Some(TokenKind::Keyword(KeywordTokenKind::Precision)) => {
                     let start_span = self.tokenizer.bump().unwrap().span;
                     let end_span = self.tokenizer.bump().unwrap().span;
@@ -192,18 +164,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     ))
                 }
                 _ => {
-                    self.emit_expected_token(&[TokenKind::Keyword(KeywordTokenKind::Precision)]);
+                    self.emit_unexpected_token();
                     return None;
                 }
-            },
-            Some(TokenKind::Keyword(KeywordTokenKind::DoublePrecision)) => Some(Spanned::new(
+            }
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::DoublePrecision)) {
+            Some(Spanned::new(
                 IntrinsicTypeSpec::DoublePrecision,
                 self.tokenizer.bump().unwrap().span,
-            )),
-            _ => {
-                self.emit_expected_token(&intrinsic_type_spec_or(&[]));
-                return None;
-            }
+            ))
+        } else {
+            self.emit_unexpected_token();
+            return None;
         }
     }
 
@@ -217,7 +189,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 self.tokenizer.bump().unwrap().span
             }
             _ => {
-                self.emit_expected_token(&[TokenKind::Keyword(expected_keyword)]);
+                self.tokenizer
+                    .push_expected(TokenKind::Keyword(expected_keyword));
+                self.emit_unexpected_token();
                 return None;
             }
         };
@@ -271,43 +245,38 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses the kind-selector of a type from the parentheses
     fn kind_selector(&mut self) -> Option<Spanned<KindSelector<'arena>>> {
-        let begin_span = match self.tokenizer.peek().map(|t| t.kind) {
-            Some(TokenKind::LeftParen) => self.tokenizer.bump().unwrap().span,
-            _ => {
-                self.emit_expected_token(&[TokenKind::LeftParen]);
-                return None;
-            }
+        let begin_span = if self.check(TokenKind::LeftParen) {
+            self.tokenizer.bump().unwrap().span
+        } else {
+            self.emit_unexpected_token();
+            return None;
         };
 
-        match self.tokenizer.peek().map(|t| t.kind) {
-            Some(TokenKind::Keyword(KeywordTokenKind::Kind)) => {
-                match self.tokenizer.peek_nth(1).map(|t| t.kind) {
-                    Some(TokenKind::Equals) => {
-                        self.tokenizer.bump(); // consume KIND
-                        self.tokenizer.bump(); // consume =
-                    }
-                    Some(TokenKind::LeftParen) => {
-                        // assume we're in an expression and let the expression parsing take over
-                    }
-                    _ => {
-                        self.emit_expected_token(&[TokenKind::Equals, TokenKind::LeftParen]);
-                        return None;
-                    }
+        if self.check(TokenKind::Keyword(KeywordTokenKind::Kind)) {
+            match self.tokenizer.peek_nth(1).map(|t| t.kind) {
+                Some(TokenKind::Equals) => {
+                    self.tokenizer.bump(); // consume KIND
+                    self.tokenizer.bump(); // consume =
+                }
+                Some(TokenKind::LeftParen) => {
+                    // assume we're in an expression and let the expression parsing take over
+                }
+                _ => {
+                    self.emit_expected_token(&[TokenKind::Equals, TokenKind::LeftParen]);
+                    return None;
                 }
             }
-            _ => {
-                // try parsing as an expression
-            }
+        } else {
+            // try parsing as an expression
         };
 
         let expr = self.expr()?;
 
-        let end_span = match self.tokenizer.peek_kind() {
-            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-            _ => {
-                self.emit_expected_token(&[TokenKind::RightParen]);
-                return None;
-            }
+        let end_span = if self.check(TokenKind::RightParen) {
+            self.tokenizer.bump().unwrap().span
+        } else {
+            self.emit_unexpected_token();
+            return None;
         };
 
         // parse scalar-int-constant-expr
@@ -321,53 +290,45 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses from the `type-name`
     fn derived_type_spec(&mut self) -> Option<Spanned<DerivedTypeSpec<'arena>>> {
-        let (name, start_span) = match self.tokenizer.peek_kind() {
-            Some(t) if t.is_name() => {
-                let t = self.tokenizer.bump().unwrap();
+        let (name, start_span) = if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
 
-                (
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                )
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::Name]);
-                return None;
-            }
+            (
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+                t.span,
+            )
+        } else {
+            self.emit_unexpected_token();
+            return None;
         };
 
-        match self.tokenizer.peek_kind() {
-            Some(TokenKind::LeftParen) => {
-                self.tokenizer.bump();
-            }
-            _ => {
-                return Some(Spanned::new(
-                    DerivedTypeSpec {
-                        name,
-                        spec_list: &[],
-                    },
-                    start_span,
-                ));
-            }
+        if self.check(TokenKind::LeftParen) {
+            self.tokenizer.bump();
+        } else {
+            return Some(Spanned::new(
+                DerivedTypeSpec {
+                    name,
+                    spec_list: &[],
+                },
+                start_span,
+            ));
         };
 
         let mut error_encountered = false;
 
         let spec_list = self.arena.type_param_specs.alloc_extend(
             std::iter::once(self.type_param_spec()?.val).chain(std::iter::from_fn(|| {
-                match self.tokenizer.peek_kind() {
-                    Some(TokenKind::Comma) => {
-                        self.tokenizer.bump();
-                    }
+                if self.check(TokenKind::Comma) {
+                    self.tokenizer.bump();
+                } else if self.check(TokenKind::RightParen) {
                     // End of list - return none
-                    Some(TokenKind::RightParen) => return None,
-                    _ => {
-                        error_encountered = true;
-                        self.emit_expected_token(&[TokenKind::Comma, TokenKind::RightParen]);
-                        return None;
-                    }
-                };
+                    return None;
+                } else {
+                    error_encountered = true;
+                    self.emit_unexpected_token();
+                    return None;
+                }
 
                 match self.type_param_spec() {
                     Some(spec) => Some(spec.val),
@@ -393,12 +354,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             .unwrap();
         }
 
-        let end_span = match self.tokenizer.peek_kind() {
-            Some(TokenKind::RightParen) => self.tokenizer.bump().unwrap().span,
-            _ => {
-                self.emit_expected_token(&[TokenKind::RightParen]);
-                return None;
-            }
+        let end_span = if self.check(TokenKind::RightParen) {
+            self.tokenizer.bump().unwrap().span
+        } else {
+            self.emit_unexpected_token();
+            return None;
         };
 
         Some(Spanned::new(
@@ -411,27 +371,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     ///
     /// Parses a type-param-spec
     fn type_param_spec(&mut self) -> Option<Spanned<TypeParamSpec<'arena>>> {
-        let keyword_and_span = match self.tokenizer.peek_nth_kind(0) {
-            Some(t) if t.is_name() => {
-                // Might be a keyword, check for =
-                match self.tokenizer.peek_nth_kind(1) {
-                    Some(TokenKind::Equals) => {
-                        let keyword = self.tokenizer.bump().unwrap(); // keyword
-                        self.tokenizer.bump(); // =
-                        Some((
-                            keyword
-                                .try_intern_contents(&mut self.interner, &self.text)
-                                .unwrap(),
-                            keyword.span,
-                        ))
-                    }
-                    _ => {
-                        // Might be an expression, back off
-                        None
-                    }
+        let keyword_and_span = if self.check_name() {
+            // Might be a keyword, check for =
+            match self.tokenizer.peek_nth_kind(1) {
+                Some(TokenKind::Equals) => {
+                    let keyword = self.tokenizer.bump().unwrap(); // keyword
+                    self.tokenizer.bump(); // =
+                    Some((
+                        keyword
+                            .try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                        keyword.span,
+                    ))
+                }
+                _ => {
+                    // Might be an expression, back off
+                    None
                 }
             }
-            _ => None,
+        } else {
+            None
         };
 
         let value = self.type_param_value()?;
