@@ -11,26 +11,20 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an assignment-stmt from the beginning of the statement. When an error is encountered,
     /// an error is emitted and the statement is skipped, marking it as unclassifiable.
     pub(super) fn assignment_stmt(&mut self) -> Stmt<'arena> {
+        let start_span = self.tokenizer.peek().unwrap().span;
+
         // TODO: This isn't right, but just parsing variable names for now.
-        let designator = match self.tokenizer.peek_kind() {
-            Some(t) if t.is_name() => {
-                let t = self.tokenizer.bump().unwrap();
-                Spanned::new(
-                    Designator::ObjectName(
-                        t.try_intern_contents(&mut self.interner, &self.text)
-                            .unwrap(),
-                    ),
-                    t.span,
-                )
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::Name]);
-                let end_span = self.take_until_eos();
-                return self.unclassifiable(
-                    end_span.map_or(self.text_len(), |s| s.start),
-                    end_span.map_or(self.text_len(), |s| s.end),
-                );
-            }
+        let designator = if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
+            Spanned::new(
+                Designator::ObjectName(
+                    t.try_intern_contents(&mut self.interner, &self.text)
+                        .unwrap(),
+                ),
+                t.span,
+            )
+        } else {
+            return self.unexpected_token(&start_span);
         };
 
         let variable = Spanned::new(
@@ -38,35 +32,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             designator.span,
         );
 
-        match self.tokenizer.peek_kind() {
-            Some(TokenKind::Equals) => {
-                self.tokenizer.bump();
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::Equals]);
-                let end_span = self.take_until_eos();
-                return self.unclassifiable(
-                    designator.span.start,
-                    end_span.map_or(designator.span.end, |s| s.end),
-                );
-            }
-        };
+        if self.check(TokenKind::Equals) {
+            self.tokenizer.bump();
+        } else {
+            return self.unexpected_token(&start_span);
+        }
 
         let expr = match self.expr() {
             Some(expr) => Spanned::new(&*self.arena.expressions.alloc(expr.val), expr.span),
             _ => {
-                self.emit_expected_token(&[
-                    TokenKind::Name,
-                    TokenKind::LeftParen,
-                    TokenKind::Plus,
-                    TokenKind::Minus,
-                    TokenKind::NotOp,
-                ]);
-                let end_span = self.take_until_eos();
-                return self.unclassifiable(
-                    designator.span.start,
-                    end_span.map_or(designator.span.end, |s| s.end),
-                );
+                return self.unexpected_token(&start_span);
             }
         };
 

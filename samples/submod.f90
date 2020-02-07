@@ -1,2 +1,3 @@
-submodule (hey:)
-end submodule
+program hey
+  is = .true.
+end program hey

@@ -207,7 +207,10 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn emit_expected_token(&mut self, tokens: &[TokenKind]) {
-        debug_assert!(!tokens.is_empty());
+        debug_assert!(
+            !tokens.is_empty(),
+            "Internal compiler error: tried to emit expected tokens, but no tokens were expected"
+        );
 
         let mut msg = if tokens.len() == 1 {
             format!("expected {}", tokens[0].friendly_name())
@@ -268,7 +271,9 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     fn emit_unexpected_token(&mut self) {
-        let tokens: Vec<_> = self.tokenizer.expected_tokens.iter().cloned().collect();
+        let mut tokens: Vec<_> = self.tokenizer.expected_tokens.iter().cloned().collect();
+        tokens.sort();
+        tokens.dedup();
         self.emit_expected_token(&tokens[..]);
     }
 
@@ -453,10 +458,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
     // TODO: Parse function or subroutine statement when it's not yet obvious which it is
     fn subroutine_or_function(&mut self, start_span: &Span) -> Stmt<'arena> {
-        match self.take_until_eos() {
-            Some(span) => self.unclassifiable(start_span.start, span.end),
-            None => self.unclassifiable(start_span.start, self.text_len()),
-        }
+        self.unimplemented(start_span)
     }
 
     /// Parses from a statement starting with 'module'. Can be a procedure-stmt, module-stmt,
@@ -697,8 +699,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else if self.tokenizer.peek().is_none() {
             return None;
         } else {
-            let token = self.tokenizer.bump().unwrap();
-            self.unexpected_token(&token.span)
+            let span = self.tokenizer.peek().unwrap().span;
+            self.unexpected_token(&span)
         };
 
         Some(stmt)
