@@ -7,25 +7,23 @@ use super::{eos_or, Classifier};
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a statement after consuming a `BLOCK DATA` token chain.
     pub(super) fn stmt_from_block_data(&mut self, block_data_span: Span) -> Stmt<'arena> {
-        let name = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => {
-                let t = self.tokenizer.bump().unwrap();
+        let name = if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
 
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                ))
-            }
-            Some(t) if Self::is_eos(&t) => None,
-            None => None,
-            _ => {
-                self.emit_expected_token(&eos_or(&[TokenKind::Keyword(KeywordTokenKind::Name)]));
+            Some(Spanned::new(
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+                t.span,
+            ))
+        } else if self.check_eos() {
+            None
+        } else if self.tokenizer.peek().is_none() {
+            None
+        } else {
+            self.emit_unexpected_token();
+            self.take_until_eos();
 
-                self.take_until_eos();
-
-                None
-            }
+            None
         };
 
         self.expect_eos();
@@ -43,59 +41,45 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a statement after consuming a single `BLOCK` token. Could be a block-data-stmt or
     /// a block-stmt.
     pub(super) fn stmt_from_block(&mut self, start_span: Span) -> Stmt<'arena> {
-        match self.tokenizer.peek() {
-            Some(t) if Self::is_eos(&t) => Stmt {
+        if self.check_eos() {
+            Stmt {
                 kind: StmtKind::Block { name: None },
                 span: start_span,
-            },
-            None => Stmt {
-                kind: StmtKind::Block { name: None },
-                span: start_span,
-            },
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Data),
-                ..
-            }) => {
-                let end = self.tokenizer.bump().unwrap().span.end;
-                self.stmt_from_block_data(Span {
-                    file_id: self.file_id,
-                    start: start_span.start,
-                    end,
-                })
             }
-            _ => {
-                self.emit_expected_token(&eos_or(&[TokenKind::Keyword(KeywordTokenKind::Data)]));
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Data)) {
+            let end = self.tokenizer.bump().unwrap().span.end;
+            self.stmt_from_block_data(Span {
+                file_id: self.file_id,
+                start: start_span.start,
+                end,
+            })
+        } else {
+            self.emit_unexpected_token();
+            self.take_until_eos();
 
-                self.take_until_eos();
-
-                Stmt {
-                    kind: StmtKind::Block { name: None },
-                    span: start_span,
-                }
+            Stmt {
+                kind: StmtKind::Block { name: None },
+                span: start_span,
             }
         }
     }
 
     pub(super) fn stmt_from_end_block_data(&mut self, end_block_data_span: Span) -> Stmt<'arena> {
-        let name = match self.tokenizer.peek() {
-            Some(t) if t.is_name() => {
-                let t = self.tokenizer.bump().unwrap();
+        let name = if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
 
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                ))
-            }
-            Some(t) if Self::is_eos(&t) => None,
-            None => None,
-            _ => {
-                self.emit_expected_token(&eos_or(&[TokenKind::Name]));
+            Some(Spanned::new(
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+                t.span,
+            ))
+        } else if self.check_eos() {
+            None
+        } else {
+            self.emit_unexpected_token();
+            self.take_until_eos();
 
-                self.take_until_eos();
-
-                None
-            }
+            None
         };
 
         self.expect_eos();
@@ -109,37 +93,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     pub(super) fn stmt_from_end_block(&mut self, end_block_span: Span) -> Stmt<'arena> {
-        let name = match self.tokenizer.peek() {
-            // If we see `Data`, we always classify as `EndBlockData`, even though it could actually
-            // be an `EndBlock` with name "data". We'll resolve the ambiguity at the ast level
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Data),
-                ..
-            }) => {
-                let span = self.tokenizer.bump().unwrap().span;
-                return self.stmt_from_end_block_data(end_block_span.concat(span));
-            }
-            Some(t) if t.is_name() => {
-                let t = self.tokenizer.bump().unwrap();
+        // If we see `Data`, we always classify as `EndBlockData`, even though it could actually
+        // be an `EndBlock` with name "data". We'll resolve the ambiguity at the ast level
+        let name = if self.check(TokenKind::Keyword(KeywordTokenKind::Data)) {
+            let span = self.tokenizer.bump().unwrap().span;
+            return self.stmt_from_end_block_data(end_block_span.concat(span));
+        } else if self.check_name() {
+            let t = self.tokenizer.bump().unwrap();
 
-                Some(Spanned::new(
-                    t.try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                    t.span,
-                ))
-            }
-            Some(t) if Self::is_eos(&t) => None,
-            None => None,
-            _ => {
-                self.emit_expected_token(&eos_or(&[
-                    TokenKind::Keyword(KeywordTokenKind::Data),
-                    TokenKind::Name,
-                ]));
+            Some(Spanned::new(
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+                t.span,
+            ))
+        } else if self.check_eos() {
+            None
+        } else {
+            self.emit_unexpected_token();
+            self.take_until_eos();
 
-                self.take_until_eos();
-
-                None
-            }
+            None
         };
 
         self.expect_eos();
