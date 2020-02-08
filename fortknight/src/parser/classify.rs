@@ -718,13 +718,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         // bumps the final token so that we're either ready to parse the next only or the next
         // statement
-        self.tokenizer.bump();
-
-        match self.tokenizer.peek() {
-            Some(t) if Self::is_eos(t) => None,
-            None => None,
-            // Consume the comma so we're ready to parse the next potential "only"
-            _ => Some(()),
+        if let Some(_) = self.check_eos_and_bump() {
+            None
+        } else {
+            self.tokenizer.bump();
+            Some(())
         }
     }
 }
