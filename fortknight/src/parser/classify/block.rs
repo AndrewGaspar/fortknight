@@ -1,8 +1,8 @@
-use crate::parser::lex::{KeywordTokenKind, Token, TokenKind};
+use crate::parser::lex::{KeywordTokenKind, TokenKind};
 use crate::span::Span;
 
 use super::statements::{Spanned, Stmt, StmtKind};
-use super::{eos_or, Classifier};
+use super::Classifier;
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses a statement after consuming a `BLOCK DATA` token chain.

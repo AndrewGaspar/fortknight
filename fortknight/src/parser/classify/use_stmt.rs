@@ -1,9 +1,9 @@
 use crate::intern::InternedName;
-use crate::parser::lex::{KeywordTokenKind, Token, TokenKind};
+use crate::parser::lex::{KeywordTokenKind, TokenKind};
 use crate::span::Span;
 
 use super::statements::{self, DefinedOperator, Only, Rename, Spanned, Stmt, StmtKind};
-use super::{eos_or, Classifier, TakeUntil};
+use super::{Classifier, TakeUntil};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses defined operator from everything after `OPERATOR (`

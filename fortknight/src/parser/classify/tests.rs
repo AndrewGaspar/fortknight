@@ -16,6 +16,7 @@ use crate::span::Span;
 mod assignment_tests;
 mod block_tests;
 mod implicit_tests;
+mod label_tests;
 
 #[test]
 fn program() {
@@ -889,7 +890,7 @@ pub(crate) fn get_stmts<'a>(classifier: &'_ mut Classifier<'_, 'a>) -> Vec<StmtK
     let mut stmts = vec![];
 
     while let Some(stmt) = classifier.next_stmt() {
-        stmts.push(stmt.kind);
+        stmts.push(stmt.stmt.kind);
     }
 
     stmts

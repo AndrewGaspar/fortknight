@@ -8,7 +8,7 @@ use super::statements::{
     DeclarationTypeSpec, ImplicitSpec, ImplicitStmt, IntegerTypeSpec, IntrinsicTypeSpec,
     LetterSpec, Spanned, Stmt, StmtKind,
 };
-use super::{eos_or, Classifier};
+use super::Classifier;
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// Parses an implicit-stmt after consuming the `IMPLICIT` token

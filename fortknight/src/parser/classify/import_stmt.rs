@@ -1,9 +1,9 @@
 use crate::intern::InternedName;
-use crate::parser::lex::{KeywordTokenKind, Token, TokenKind};
+use crate::parser::lex::{KeywordTokenKind, TokenKind};
 use crate::span::Span;
 
 use super::statements::{ImportStmt, Spanned, Stmt, StmtKind};
-use super::{eos_or, Classifier};
+use super::Classifier;
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     pub(super) fn import_statement(&mut self, start_span: Span) -> Stmt<'arena> {

@@ -8,7 +8,7 @@ use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode, SemanticE
 use crate::index::FileId;
 use crate::intern::InternedName;
 use crate::parser::lex::{KeywordTokenKind, PeekableTokenizer, Token, TokenKind, TokenizerOptions};
-use crate::span::Span;
+use crate::{num::Uint, span::Span};
 
 mod assignment;
 mod block;
@@ -27,7 +27,7 @@ mod tests;
 use statements::{
     Expr, ImplicitSpec, LetterSpec, Only, ParentIdentifier, Rename, Spanned, TypeParamSpec,
 };
-pub use statements::{Stmt, StmtKind};
+pub use statements::{LabeledStmt, Stmt, StmtKind};
 
 pub enum Lookahead<'a> {
     Token(&'a Token),
@@ -617,24 +617,55 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
-    pub fn next_stmt(&mut self) -> Option<Stmt<'arena>> {
+    pub fn next_stmt(&mut self) -> Option<LabeledStmt<'arena>> {
         // Check if there are any more tokens and return None if not.
         self.tokenizer.peek()?;
+
+        let label = if let Some(t) = self.check_and_bump(TokenKind::DigitString) {
+            let num = t.try_into_uint(&self.text, &self.arena.big_uints).unwrap();
+            let label = match num {
+                Uint::Big(_) => None,
+                Uint::Small(x) => {
+                    if x >= 100000 {
+                        None
+                    } else {
+                        Some(x)
+                    }
+                }
+            };
+
+            let label_span = t.span;
+
+            if let Some(label) = label {
+                Some(Spanned::new(label, label_span))
+            } else {
+                self.emit_error_span(
+                    ParserErrorCode::TooLongLabel,
+                    label_span,
+                    "A label may not exceed five digits.",
+                );
+
+                None
+            }
+        } else {
+            None
+        };
 
         // Look ahead for assignments
         // TODO: This just looks for a variable name then =, which is incomplete. Need to support
         // array elements, array sections, substrings, structure components, etc.
-        match self.tokenizer.peek_nth_kind(0) {
-            Some(t) if t.is_name() => match self.tokenizer.peek_nth_kind(1) {
-                Some(TokenKind::Equals) => {
-                    return Some(self.assignment_stmt());
-                }
-                _ => {}
-            },
-            _ => {}
+        let is_assignment = if self.check_name() {
+            match self.tokenizer.peek_nth_kind(1) {
+                Some(TokenKind::Equals) => true,
+                _ => false,
+            }
+        } else {
+            false
         };
 
-        let stmt = if self.check(TokenKind::Keyword(KeywordTokenKind::End)) {
+        let stmt = if is_assignment {
+            self.assignment_stmt()
+        } else if self.check(TokenKind::Keyword(KeywordTokenKind::End)) {
             let token = self.tokenizer.bump().unwrap();
             self.end(&token.span)
         } else if self.check(TokenKind::Keyword(KeywordTokenKind::Implicit)) {
@@ -682,11 +713,18 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else if self.check(TokenKind::Keyword(KeywordTokenKind::Format)) {
             let token = self.tokenizer.bump().unwrap();
             self.format(&token.span)
-        } else if self.check_eos() {
-            let token = self.tokenizer.bump().unwrap();
+        } else if let Some(t) = self.check_eos_and_bump() {
+            if let Some(label) = &label {
+                self.emit_error_span(
+                    ParserErrorCode::LabeledEmptyStatement,
+                    label.span,
+                    "Labels are not permitted on blank lines",
+                );
+            }
+
             Stmt {
                 kind: StmtKind::Empty,
-                span: token.span,
+                span: t.span,
             }
         } else if self.tokenizer.peek().is_none() {
             return None;
@@ -695,7 +733,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             self.unexpected_token(&span)
         };
 
-        Some(stmt)
+        Some(LabeledStmt { stmt, label })
     }
 
     /// Called when there's an error parsing some comma separated list - attempt to skip to the next
@@ -725,49 +763,4 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             Some(())
         }
     }
-}
-
-fn eos_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
-    let mut vec = Vec::with_capacity(3 + tokens.len());
-
-    vec.extend_from_slice(&[
-        TokenKind::SemiColon,
-        TokenKind::NewLine,
-        TokenKind::Commentary,
-    ]);
-    vec.extend_from_slice(tokens);
-
-    vec
-}
-
-const INTRINSIC_TYPE_SPEC_TOKENS: &'static [TokenKind] = &[
-    TokenKind::Keyword(KeywordTokenKind::Integer),
-    TokenKind::Keyword(KeywordTokenKind::Real),
-    TokenKind::Keyword(KeywordTokenKind::Double),
-    TokenKind::Keyword(KeywordTokenKind::DoublePrecision),
-    TokenKind::Keyword(KeywordTokenKind::Complex),
-    TokenKind::Keyword(KeywordTokenKind::Character),
-    TokenKind::Keyword(KeywordTokenKind::Logical),
-];
-
-fn intrinsic_type_spec_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
-    let mut vec = Vec::with_capacity(INTRINSIC_TYPE_SPEC_TOKENS.len() + tokens.len());
-
-    vec.extend_from_slice(INTRINSIC_TYPE_SPEC_TOKENS);
-    vec.extend_from_slice(tokens);
-
-    vec
-}
-
-fn declaration_type_spec_or(tokens: &[TokenKind]) -> Vec<TokenKind> {
-    let mut vec = Vec::with_capacity(2 + INTRINSIC_TYPE_SPEC_TOKENS.len() + tokens.len());
-
-    vec.extend_from_slice(INTRINSIC_TYPE_SPEC_TOKENS);
-    vec.extend_from_slice(&[
-        TokenKind::Keyword(KeywordTokenKind::Type),
-        TokenKind::Keyword(KeywordTokenKind::Class),
-    ]);
-    vec.extend_from_slice(tokens);
-
-    vec
 }

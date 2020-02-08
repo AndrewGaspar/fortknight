@@ -4,7 +4,7 @@ use super::statements::{
     DeclarationTypeSpec, DerivedTypeSpec, IntegerTypeSpec, IntrinsicTypeSpec, KindSelector,
     Spanned, TypeParamSpec, TypeParamValue,
 };
-use super::{declaration_type_spec_or, intrinsic_type_spec_or, Classifier, TakeUntil};
+use super::{Classifier, TakeUntil};
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
     /// R701: type-param-value

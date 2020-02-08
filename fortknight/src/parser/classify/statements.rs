@@ -977,3 +977,9 @@ pub struct Stmt<'a> {
     pub kind: StmtKind<'a>,
     pub span: Span,
 }
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct LabeledStmt<'a> {
+    pub stmt: Stmt<'a>,
+    pub label: Option<Spanned<u32>>,
+}
