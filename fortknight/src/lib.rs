@@ -83,14 +83,6 @@ impl AnalysisEngine {
                 .unwrap(),
         );
 
-        let tokenizer = parser::lex::Tokenizer::new(
-            &parser::lex::TokenizerOptions::default(),
-            file_id,
-            &self.data.file_data.contents.last().unwrap(),
-            &self.diagnostics,
-        );
-        self.data.file_data.tokens.push(tokenizer.collect());
-
         let mut interner = crate::intern::StringInterner::new();
         let mut arena = parser::classify::ClassifierArena::new();
 
