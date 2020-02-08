@@ -1,8 +1,26 @@
-use crate::parser::lex::{KeywordTokenKind, TokenKind};
+use crate::parser::lex::{KeywordTokenKind, Token, TokenKind};
+use crate::span::Span;
 
 use super::Classifier;
 
 impl<'input, 'arena> Classifier<'input, 'arena> {
+    pub(super) fn check(&mut self, expected: TokenKind) -> bool {
+        if let Some(k) = self.tokenizer.peek_kind() {
+            self.expect_token(k, expected)
+        } else {
+            self.tokenizer.push_expected(expected);
+            false
+        }
+    }
+
+    pub(super) fn check_and_bump(&mut self, expected: TokenKind) -> Option<Token> {
+        if self.check(expected) {
+            self.tokenizer.bump()
+        } else {
+            None
+        }
+    }
+
     pub(super) fn check_name(&mut self) -> bool {
         if let Some(k) = self.tokenizer.peek_kind() {
             if k.is_name() {
@@ -12,6 +30,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         self.tokenizer.expected_tokens.push(TokenKind::Name);
         false
+    }
+
+    pub(super) fn check_name_and_bump(&mut self) -> Option<Token> {
+        if self.check_name() {
+            self.tokenizer.bump()
+        } else {
+            None
+        }
     }
 
     pub(super) fn check_eos(&mut self) -> bool {
@@ -26,6 +52,26 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         self.tokenizer.push_expected(TokenKind::NewLine);
         self.tokenizer.push_expected(TokenKind::SemiColon);
         false
+    }
+
+    pub(super) fn check_eos_and_bump(&mut self) -> Option<Token> {
+        if self.check_eos() {
+            Some(if let Some(t) = self.tokenizer.bump() {
+                t
+            } else {
+                // Return a "NewLine" token for end-of-file
+                Token {
+                    kind: TokenKind::NewLine,
+                    span: Span {
+                        file_id: self.file_id,
+                        start: self.text_len(),
+                        end: self.text_len(),
+                    },
+                }
+            })
+        } else {
+            None
+        }
     }
 
     pub(super) fn check_declaration_type_spec_start(&mut self) -> bool {

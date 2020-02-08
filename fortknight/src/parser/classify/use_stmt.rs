@@ -15,309 +15,179 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             AddOp, AndOp, ConcatOp, EquivOp, IntrinsicOperator, MultOp, NotOp, OrOp, PowerOp, RelOp,
         };
 
-        let defined_operator = match self.tokenizer.peek() {
-            t
-            @
-            Some(Token {
-                kind: TokenKind::DefinedOperator,
-                ..
-            }) => {
-                // let t = self.tokenizer.bump().unwrap();
-                DefinedOperator::DefinedUnaryOrBinaryOp(
-                    t.cloned()
-                        .unwrap()
-                        .try_intern_contents(&mut self.interner, &self.text)
-                        .unwrap(),
-                )
-            }
-            Some(Token {
-                kind: TokenKind::StarStar,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::PowerOp(PowerOp)),
-            Some(Token {
-                kind: TokenKind::Star,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::MultOp(MultOp::Multiply)),
-            Some(Token {
-                kind: TokenKind::Slash,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::MultOp(MultOp::Divide)),
-            Some(Token {
-                kind: TokenKind::Plus,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AddOp(AddOp::Plus)),
-            Some(Token {
-                kind: TokenKind::Minus,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AddOp(AddOp::Minus)),
-            Some(Token {
-                kind: TokenKind::SlashSlash,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::ConcatOp(ConcatOp)),
-            Some(Token {
-                kind: TokenKind::EqualsOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::EqualNamed)),
-            Some(Token {
-                kind: TokenKind::NotEqualsOp,
-                ..
-            }) => {
-                DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::NotEqualNamed))
-            }
-            Some(Token {
-                kind: TokenKind::LessThanOp,
-                ..
-            }) => {
-                DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::LessThanNamed))
-            }
-            Some(Token {
-                kind: TokenKind::LessThanOrEqualsOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
+        let defined_operator = if let Some(t) = self.check_and_bump(TokenKind::DefinedOperator) {
+            DefinedOperator::DefinedUnaryOrBinaryOp(
+                t.try_intern_contents(&mut self.interner, &self.text)
+                    .unwrap(),
+            )
+        } else if let Some(_) = self.check_and_bump(TokenKind::StarStar) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::PowerOp(PowerOp))
+        } else if let Some(_) = self.check_and_bump(TokenKind::Star) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::MultOp(MultOp::Multiply))
+        } else if let Some(_) = self.check_and_bump(TokenKind::Slash) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::MultOp(MultOp::Divide))
+        } else if let Some(_) = self.check_and_bump(TokenKind::Plus) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AddOp(AddOp::Plus))
+        } else if let Some(_) = self.check_and_bump(TokenKind::Minus) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AddOp(AddOp::Minus))
+        } else if let Some(_) = self.check_and_bump(TokenKind::SlashSlash) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::ConcatOp(ConcatOp))
+        } else if let Some(_) = self.check_and_bump(TokenKind::EqualsOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::EqualNamed))
+        } else if let Some(_) = self.check_and_bump(TokenKind::NotEqualsOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::NotEqualNamed))
+        } else if let Some(_) = self.check_and_bump(TokenKind::LessThanOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::LessThanNamed))
+        } else if let Some(_) = self.check_and_bump(TokenKind::LessThanOrEqualsOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
                 RelOp::LessThanOrEqualNamed,
-            )),
-            Some(Token {
-                kind: TokenKind::GreaterThanOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
-                RelOp::GreaterThanNamed,
-            )),
-            Some(Token {
-                kind: TokenKind::GreaterThanOrEqualsOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
+            ))
+        } else if let Some(_) = self.check_and_bump(TokenKind::GreaterThanOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::GreaterThanNamed))
+        } else if let Some(_) = self.check_and_bump(TokenKind::GreaterThanOrEqualsOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
                 RelOp::GreaterThanOrEqualNamed,
-            )),
-            Some(Token {
-                kind: TokenKind::EqualsEquals,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::Equal)),
-            Some(Token {
-                kind: TokenKind::SlashEquals,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::NotEqual)),
-            Some(Token {
-                kind: TokenKind::LeftAngle,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::LessThan)),
-            Some(Token {
-                kind: TokenKind::LeftAngleEquals,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
-                RelOp::LessThanOrEqual,
-            )),
-            Some(Token {
-                kind: TokenKind::RightAngle,
-                ..
-            }) => {
-                DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::GreaterThan))
-            }
-            Some(Token {
-                kind: TokenKind::RightAngleEquals,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
+            ))
+        } else if let Some(_) = self.check_and_bump(TokenKind::EqualsEquals) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::Equal))
+        } else if let Some(_) = self.check_and_bump(TokenKind::SlashEquals) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::NotEqual))
+        } else if let Some(_) = self.check_and_bump(TokenKind::LeftAngle) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::LessThan))
+        } else if let Some(_) = self.check_and_bump(TokenKind::LeftAngleEquals) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::LessThanOrEqual))
+        } else if let Some(_) = self.check_and_bump(TokenKind::RightAngle) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(RelOp::GreaterThan))
+        } else if let Some(_) = self.check_and_bump(TokenKind::RightAngleEquals) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::RelOp(
                 RelOp::GreaterThanOrEqual,
-            )),
-            Some(Token {
-                kind: TokenKind::NotOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::NotOp(NotOp)),
-            Some(Token {
-                kind: TokenKind::AndOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AndOp(AndOp)),
-            Some(Token {
-                kind: TokenKind::OrOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::OrOp(OrOp)),
-            Some(Token {
-                kind: TokenKind::EquivalentOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::EquivOp(
-                EquivOp::Equivalence,
-            )),
-            Some(Token {
-                kind: TokenKind::NotEquivalentOp,
-                ..
-            }) => DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::EquivOp(
+            ))
+        } else if let Some(_) = self.check_and_bump(TokenKind::NotOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::NotOp(NotOp))
+        } else if let Some(_) = self.check_and_bump(TokenKind::AndOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::AndOp(AndOp))
+        } else if let Some(_) = self.check_and_bump(TokenKind::OrOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::OrOp(OrOp))
+        } else if let Some(_) = self.check_and_bump(TokenKind::EquivalentOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::EquivOp(EquivOp::Equivalence))
+        } else if let Some(_) = self.check_and_bump(TokenKind::NotEquivalentOp) {
+            DefinedOperator::ExtendedIntrinsicOp(IntrinsicOperator::EquivOp(
                 EquivOp::NonEquivalence,
-            )),
-            _ => {
-                self.emit_expected_token(&[
-                    TokenKind::StarStar,
-                    TokenKind::Star,
-                    TokenKind::Slash,
-                    TokenKind::Plus,
-                    TokenKind::Minus,
-                    TokenKind::SlashSlash,
-                    TokenKind::EqualsOp,
-                    TokenKind::NotEqualsOp,
-                    TokenKind::LessThanOp,
-                    TokenKind::LessThanOrEqualsOp,
-                    TokenKind::GreaterThanOp,
-                    TokenKind::GreaterThanOrEqualsOp,
-                    TokenKind::EqualsEquals,
-                    TokenKind::SlashEquals,
-                    TokenKind::LeftAngle,
-                    TokenKind::LeftAngleEquals,
-                    TokenKind::RightAngle,
-                    TokenKind::RightAngleEquals,
-                    TokenKind::NotOp,
-                    TokenKind::AndOp,
-                    TokenKind::OrOp,
-                    TokenKind::EquivalentOp,
-                    TokenKind::NotEquivalentOp,
-                ]);
+            ))
+        } else {
+            self.emit_unexpected_token();
 
-                return Err(if self.skip_to_comma_or_eos().is_none() {
-                    TakeUntil::Stop
-                } else {
-                    TakeUntil::Continue
-                });
-            }
+            return Err(if self.skip_to_comma_or_eos().is_none() {
+                TakeUntil::Stop
+            } else {
+                TakeUntil::Continue
+            });
         };
 
-        // consume the defined-operator
-        self.tokenizer.bump().unwrap();
+        if let Some(t) = self.check_and_bump(TokenKind::RightParen) {
+            let end = t.span.end;
+            Ok(Spanned::new(
+                defined_operator,
+                Span {
+                    file_id: self.file_id,
+                    start: start_span.start,
+                    end,
+                },
+            ))
+        } else {
+            self.emit_unexpected_token();
 
-        match self.tokenizer.peek() {
-            Some(Token {
-                kind: TokenKind::RightParen,
-                ..
-            }) => {
-                let end = self.tokenizer.bump().unwrap().span.end;
-                Ok(Spanned::new(
-                    defined_operator,
-                    Span {
-                        file_id: self.file_id,
-                        start: start_span.start,
-                        end,
-                    },
-                ))
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::RightParen]);
-
-                Err(if self.skip_to_comma_or_eos().is_none() {
-                    TakeUntil::Stop
-                } else {
-                    TakeUntil::Continue
-                })
-            }
+            Err(if self.skip_to_comma_or_eos().is_none() {
+                TakeUntil::Stop
+            } else {
+                TakeUntil::Continue
+            })
         }
     }
+
     /// Parses a user-defined operator declaration (e.g. `OPERATOR ( .NAME. )`)
     fn user_defined_operator(&mut self) -> Result<Spanned<InternedName>, TakeUntil> {
-        let start_span = match self.tokenizer.peek() {
-            Some(Token {
-                kind: TokenKind::Keyword(KeywordTokenKind::Operator),
-                ..
-            }) => self.tokenizer.bump().unwrap().span,
-            _ => {
-                self.emit_expected_token(&[TokenKind::Keyword(KeywordTokenKind::Operator)]);
+        let start_span =
+            if let Some(t) = self.check_and_bump(TokenKind::Keyword(KeywordTokenKind::Operator)) {
+                t.span
+            } else {
+                self.emit_unexpected_token();
 
                 return Err(if self.skip_to_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
                 });
-            }
+            };
+
+        if let Some(_) = self.check_and_bump(TokenKind::LeftParen) {
+        } else {
+            self.emit_unexpected_token();
+
+            return Err(if self.skip_to_comma_or_eos().is_none() {
+                TakeUntil::Stop
+            } else {
+                TakeUntil::Continue
+            });
         };
 
-        match self.tokenizer.peek() {
-            Some(Token {
-                kind: TokenKind::LeftParen,
-                ..
-            }) => {
-                self.tokenizer.bump();
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::LeftParen]);
-
-                return Err(if self.skip_to_comma_or_eos().is_none() {
-                    TakeUntil::Stop
-                } else {
-                    TakeUntil::Continue
-                });
-            }
-        };
-
-        let name = match self.tokenizer.peek() {
-            Some(Token {
-                kind: TokenKind::DefinedOperator,
-                ..
-            }) => self
-                .tokenizer
-                .bump()
+        let name = if let Some(t) = self.check_and_bump(TokenKind::DefinedOperator) {
+            t.try_intern_contents(&mut self.interner, &self.text)
                 .unwrap()
-                .try_intern_contents(&mut self.interner, &self.text)
-                .unwrap(),
-            _ => {
-                self.emit_expected_token(&[TokenKind::DefinedOperator]);
+        } else {
+            self.emit_unexpected_token();
 
-                return Err(if self.skip_to_comma_or_eos().is_none() {
-                    TakeUntil::Stop
-                } else {
-                    TakeUntil::Continue
-                });
-            }
+            return Err(if self.skip_to_comma_or_eos().is_none() {
+                TakeUntil::Stop
+            } else {
+                TakeUntil::Continue
+            });
         };
 
-        match self.tokenizer.peek() {
-            Some(Token {
-                kind: TokenKind::RightParen,
-                ..
-            }) => {
-                let end = self.tokenizer.bump().unwrap().span.end;
+        if let Some(t) = self.check_and_bump(TokenKind::RightParen) {
+            let end = t.span.end;
 
-                Ok(Spanned::new(
-                    name,
-                    Span {
-                        file_id: self.file_id,
-                        start: start_span.start,
-                        end,
-                    },
-                ))
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::RightParen]);
+            Ok(Spanned::new(
+                name,
+                Span {
+                    file_id: self.file_id,
+                    start: start_span.start,
+                    end,
+                },
+            ))
+        } else {
+            self.emit_unexpected_token();
 
-                return Err(if self.skip_to_comma_or_eos().is_none() {
-                    TakeUntil::Stop
-                } else {
-                    TakeUntil::Continue
-                });
-            }
+            return Err(if self.skip_to_comma_or_eos().is_none() {
+                TakeUntil::Stop
+            } else {
+                TakeUntil::Continue
+            });
         }
     }
 
     /// Parse the RHS of a non-operator rename (e.g. the "to" in "from => to"). Returns None and
     /// progresses to the next comma or EOS if the upcoming token isn't a name.
     fn rename_rhs(&mut self, from: InternedName, start_span: Span) -> Option<Spanned<Rename>> {
-        match self.tokenizer.peek() {
-            Some(to) if to.is_name() => {
-                let to = self.tokenizer.bump().unwrap();
+        if let Some(t) = self.check_name_and_bump() {
+            let end = t.span.end;
+            let to = t
+                .try_intern_contents(&mut self.interner, &self.text)
+                .unwrap();
 
-                let end = to.span.end;
-                let to = to
-                    .try_intern_contents(&mut self.interner, &self.text)
-                    .unwrap();
+            Some(Spanned::new(
+                Rename::Name { from, to },
+                Span {
+                    file_id: self.file_id,
+                    start: start_span.start,
+                    end,
+                },
+            ))
+        } else {
+            self.emit_unexpected_token();
 
-                Some(Spanned::new(
-                    Rename::Name { from, to },
-                    Span {
-                        file_id: self.file_id,
-                        start: start_span.start,
-                        end,
-                    },
-                ))
-            }
-            _ => {
-                self.emit_expected_token(&[TokenKind::Name]);
-
-                self.skip_to_comma_or_eos()?;
-                None
-            }
+            self.skip_to_comma_or_eos()?;
+            None
         }
     }
 
@@ -330,7 +200,11 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         start_span: Span,
     ) -> Option<Spanned<Rename>> {
         // consume arrow
-        self.tokenizer.bump().unwrap();
+        if let Some(_) = self.check_and_bump(TokenKind::Arrow) {
+        } else {
+            self.emit_unexpected_token();
+            return None;
+        }
 
         let operator_name = self.user_defined_operator().ok()?;
 
@@ -353,10 +227,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             let t = if self.check_name() {
                 self.tokenizer.bump().unwrap()
             } else {
-                self.emit_expected_token(&[
-                    TokenKind::Name,
-                    TokenKind::Keyword(KeywordTokenKind::Operator),
-                ]);
+                self.emit_unexpected_token();
 
                 self.skip_to_comma_or_eos()?;
                 continue;
@@ -365,9 +236,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             let kind = t.kind;
             let start_span = t.span;
 
-            if self.check(TokenKind::Arrow) {
-                self.tokenizer.bump();
-
+            if let Some(_) = self.check_and_bump(TokenKind::Arrow) {
                 let name = t
                     .try_intern_contents(&mut self.interner, &self.text)
                     .unwrap();
@@ -381,21 +250,17 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             {
                 self.tokenizer.bump();
 
-                let name = if self.check(TokenKind::DefinedOperator) {
-                    self.tokenizer
-                        .bump()
-                        .unwrap()
-                        .try_intern_contents(&mut self.interner, &self.text)
+                let name = if let Some(t) = self.check_and_bump(TokenKind::DefinedOperator) {
+                    t.try_intern_contents(&mut self.interner, &self.text)
                         .unwrap()
                 } else {
-                    self.emit_expected_token(&[TokenKind::DefinedOperator]);
+                    self.emit_unexpected_token();
 
                     self.skip_to_comma_or_eos()?;
                     continue;
                 };
 
-                if self.check(TokenKind::RightParen) {
-                    self.tokenizer.bump();
+                if let Some(_) = self.check_and_bump(TokenKind::RightParen) {
                 } else {
                     self.emit_unexpected_token();
                     self.skip_to_comma_or_eos()?;
@@ -429,21 +294,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         loop {
             // We need to look ahead to see if we're in a rename or generic-spec
-            let t = match self.tokenizer.bump() {
-                Some(t) if t.is_name() => t,
-                _ => {
-                    // On unexpected token, emit an error, but still return a statement
-                    self.emit_expected_token(&[
-                        TokenKind::Name,
-                        TokenKind::Keyword(KeywordTokenKind::Operator),
-                        TokenKind::Keyword(KeywordTokenKind::Assignment),
-                        TokenKind::Keyword(KeywordTokenKind::Read),
-                        TokenKind::Keyword(KeywordTokenKind::Write),
-                    ]);
+            let t = if let Some(t) = self.check_name_and_bump() {
+                t
+            } else {
+                // On unexpected token, emit an error, but still return a statement
+                self.emit_unexpected_token();
 
-                    self.skip_to_comma_or_eos()?;
-                    continue;
-                }
+                self.skip_to_comma_or_eos()?;
+                continue;
             };
 
             let start_span = t.span;
@@ -457,87 +315,55 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 Rename,
             }
 
-            let what_is_it = match self.tokenizer.peek() {
-                Some(Token {
-                    kind: TokenKind::Arrow,
-                    ..
-                }) => {
-                    self.tokenizer.bump();
-                    WhatIsIt::Rename
-                }
-                Some(Token {
-                    kind: TokenKind::LeftParen,
-                    ..
-                }) => {
-                    let what_is_it = match t.kind {
-                        TokenKind::Keyword(keyword) => match keyword {
-                            KeywordTokenKind::Operator => Some(WhatIsIt::OperatorOrRename),
-                            KeywordTokenKind::Assignment => Some(WhatIsIt::Assignment),
-                            KeywordTokenKind::Read => Some(WhatIsIt::Read),
-                            KeywordTokenKind::Write => Some(WhatIsIt::Write),
-                            _ => None,
-                        },
-                        TokenKind::Name => None,
-                        _ => panic!("Internal error: This token was guaranteed to be a name"),
-                    };
+            let what_is_it = if let Some(_) = self.check_and_bump(TokenKind::Arrow) {
+                WhatIsIt::Rename
+            } else if self.check(TokenKind::Comma) {
+                // We don't consume the comma, but this is just a plain name - return it!
+                let span = t.span;
+                return Some(Spanned::new(
+                    Only::GenericOrOnlyUseName(
+                        t.try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                    ),
+                    span,
+                ));
+            } else if self.check_eos() {
+                // We don't consume the EOS, but this is just a plain name - return it!
+                let span = t.span;
+                return Some(Spanned::new(
+                    Only::GenericOrOnlyUseName(
+                        t.try_intern_contents(&mut self.interner, &self.text)
+                            .unwrap(),
+                    ),
+                    span,
+                ));
+            } else if let Some(_) = self.check_and_bump(TokenKind::LeftParen) {
+                let what_is_it = match t.kind {
+                    TokenKind::Keyword(keyword) => match keyword {
+                        KeywordTokenKind::Operator => Some(WhatIsIt::OperatorOrRename),
+                        KeywordTokenKind::Assignment => Some(WhatIsIt::Assignment),
+                        KeywordTokenKind::Read => Some(WhatIsIt::Read),
+                        KeywordTokenKind::Write => Some(WhatIsIt::Write),
+                        _ => None,
+                    },
+                    TokenKind::Name => None,
+                    _ => panic!("Internal error: This token was guaranteed to be a name"),
+                };
 
-                    match what_is_it {
-                        Some(what_is_it) => {
-                            self.tokenizer.bump();
-                            what_is_it
-                        }
-                        None => {
-                            // If it's just a plain name, then it should be followed by a comma or
-                            // arrow
-                            self.emit_expected_token(&[TokenKind::Comma, TokenKind::Arrow]);
-
-                            self.skip_to_comma_or_eos()?;
-                            continue;
-                        }
+                match what_is_it {
+                    Some(what_is_it) => what_is_it,
+                    None => {
+                        // If it's just a plain name, then it should be followed by a comma or
+                        // arrow
+                        self.emit_unexpected_token();
+                        self.skip_to_comma_or_eos()?;
+                        continue;
                     }
                 }
-                Some(Token {
-                    kind: TokenKind::Comma,
-                    ..
-                }) => {
-                    // We don't consume the comma, but this is just a plain name - return it!
-                    let span = t.span;
-                    return Some(Spanned::new(
-                        Only::GenericOrOnlyUseName(
-                            t.try_intern_contents(&mut self.interner, &self.text)
-                                .unwrap(),
-                        ),
-                        span,
-                    ));
-                }
-                Some(t2) if Self::is_eos(t2) => {
-                    // We don't consume the EOS, but this is just a plain name - return it!
-                    let span = t.span;
-                    return Some(Spanned::new(
-                        Only::GenericOrOnlyUseName(
-                            t.try_intern_contents(&mut self.interner, &self.text)
-                                .unwrap(),
-                        ),
-                        span,
-                    ));
-                }
-                None => {
-                    // We don't consume the EOS, but this is just a plain name - return it!
-                    let span: Span = t.span;
-                    return Some(Spanned::new(
-                        Only::GenericOrOnlyUseName(
-                            t.try_intern_contents(&mut self.interner, &self.text)
-                                .unwrap(),
-                        ),
-                        span,
-                    ));
-                }
-                _ => {
-                    self.emit_expected_token(&[TokenKind::Arrow, TokenKind::Comma]);
-
-                    self.skip_to_comma_or_eos()?;
-                    continue;
-                }
+            } else {
+                self.emit_unexpected_token();
+                self.skip_to_comma_or_eos()?;
+                continue;
             };
 
             return Some(match what_is_it {
@@ -578,30 +404,21 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         };
                         Spanned::new(Only::Rename(rename.val), rename.span)
                     } else {
-                        if user_defined_operator.is_some() {
-                            self.emit_expected_token(&eos_or(&[
-                                TokenKind::Comma,
-                                TokenKind::Arrow,
-                            ]));
-                        } else {
-                            self.emit_expected_token(&eos_or(&[TokenKind::Comma]));
-                        }
-
+                        self.emit_unexpected_token();
                         self.skip_to_comma_or_eos()?;
                         continue;
                     }
                 }
                 WhatIsIt::Assignment => {
-                    if self.check(TokenKind::Equals) {
-                        self.tokenizer.bump();
+                    if let Some(_) = self.check_and_bump(TokenKind::Equals) {
                     } else {
                         self.emit_unexpected_token();
                         self.skip_to_comma_or_eos()?;
                         continue;
                     }
 
-                    if self.check(TokenKind::RightParen) {
-                        let end = self.tokenizer.bump().unwrap().span.end;
+                    if let Some(t) = self.check_and_bump(TokenKind::RightParen) {
+                        let end = t.span.end;
 
                         Spanned::new(
                             Only::GenericSpec(GenericSpec::Assignment),
@@ -612,41 +429,36 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             },
                         )
                     } else {
-                        self.emit_expected_token(&[TokenKind::RightParen]);
-
+                        self.emit_unexpected_token();
                         self.skip_to_comma_or_eos()?;
                         continue;
                     }
                 }
                 WhatIsIt::Read | WhatIsIt::Write => {
-                    let defined_io_generic_spec =
-                        if self.check(TokenKind::Keyword(KeywordTokenKind::Formatted)) {
-                            if what_is_it == WhatIsIt::Read {
-                                DefinedIoGenericSpec::ReadFormatted
-                            } else {
-                                DefinedIoGenericSpec::WriteFormatted
-                            }
-                        } else if self.check(TokenKind::Keyword(KeywordTokenKind::Unformatted)) {
-                            if what_is_it == WhatIsIt::Read {
-                                DefinedIoGenericSpec::ReadUnformatted
-                            } else {
-                                DefinedIoGenericSpec::WriteUnformatted
-                            }
+                    let defined_io_generic_spec = if let Some(_) =
+                        self.check_and_bump(TokenKind::Keyword(KeywordTokenKind::Formatted))
+                    {
+                        if what_is_it == WhatIsIt::Read {
+                            DefinedIoGenericSpec::ReadFormatted
                         } else {
-                            self.emit_expected_token(&[
-                                TokenKind::Keyword(KeywordTokenKind::Formatted),
-                                TokenKind::Keyword(KeywordTokenKind::Unformatted),
-                            ]);
+                            DefinedIoGenericSpec::WriteFormatted
+                        }
+                    } else if let Some(_) =
+                        self.check_and_bump(TokenKind::Keyword(KeywordTokenKind::Unformatted))
+                    {
+                        if what_is_it == WhatIsIt::Read {
+                            DefinedIoGenericSpec::ReadUnformatted
+                        } else {
+                            DefinedIoGenericSpec::WriteUnformatted
+                        }
+                    } else {
+                        self.emit_unexpected_token();
+                        self.skip_to_comma_or_eos()?;
+                        continue;
+                    };
 
-                            self.skip_to_comma_or_eos()?;
-                            continue;
-                        };
-
-                    // consume formatted/unformatted
-                    self.tokenizer.bump();
-
-                    if self.check(TokenKind::RightParen) {
-                        let end = self.tokenizer.bump().unwrap().span.end;
+                    if let Some(t) = self.check_and_bump(TokenKind::RightParen) {
+                        let end = t.span.end;
 
                         Spanned::new(
                             Only::GenericSpec(GenericSpec::DefinedIoGenericSpec(
@@ -659,8 +471,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                             },
                         )
                     } else {
-                        self.emit_expected_token(&[TokenKind::RightParen]);
-
+                        self.emit_unexpected_token();
                         self.skip_to_comma_or_eos()?;
                         continue;
                     }
@@ -681,30 +492,27 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     pub(super) fn use_statement(&mut self, start_span: &Span) -> Stmt<'arena> {
         use statements::{ModuleImportList, ModuleNature};
 
-        let (module_nature, name, end) = if self.check(TokenKind::Comma) {
-            self.tokenizer.bump().unwrap();
-
-            let module_nature = if self.check(TokenKind::Keyword(KeywordTokenKind::Intrinsic)) {
+        let (module_nature, name, end) = if let Some(_) = self.check_and_bump(TokenKind::Comma) {
+            let module_nature = if let Some(_) =
+                self.check_and_bump(TokenKind::Keyword(KeywordTokenKind::Intrinsic))
+            {
                 ModuleNature::Intrinsic
-            } else if self.check(TokenKind::Keyword(KeywordTokenKind::Non_Intrinsic)) {
+            } else if let Some(_) =
+                self.check_and_bump(TokenKind::Keyword(KeywordTokenKind::Non_Intrinsic))
+            {
                 ModuleNature::NonIntrinsic
             } else {
                 return self.unexpected_token(start_span);
             };
 
-            // consume the intrinsic/non_intrinsic
-            self.tokenizer.bump().unwrap();
-
-            if self.check(TokenKind::ColonColon) {
-                self.tokenizer.bump();
+            if let Some(_) = self.check_and_bump(TokenKind::ColonColon) {
             } else if self.check_name() {
                 // don't consume, we'll handle the name next
             } else {
                 return self.unexpected_token(start_span);
             }
 
-            if self.check_name() {
-                let t = self.tokenizer.bump().unwrap();
+            if let Some(t) = self.check_name_and_bump() {
                 (
                     module_nature,
                     t.try_intern_contents(&mut self.interner, &self.text)
@@ -714,8 +522,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             } else {
                 return self.unexpected_token(start_span);
             }
-        } else if self.check_name() {
-            let t = self.tokenizer.bump().unwrap();
+        } else if let Some(t) = self.check_name_and_bump() {
             (
                 ModuleNature::Unspecified,
                 t.try_intern_contents(&mut self.interner, &self.text)
@@ -728,21 +535,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
         // If we reached EOS, then we have a complete USE statement. Otherwise parse
         // only-list/rename-list
-        let is_at_end = if self.check_eos() {
-            self.tokenizer.bump();
+        let is_at_end = if let Some(_) = self.check_eos_and_bump() {
             true
-        } else if self.check(TokenKind::Comma) {
-            self.tokenizer.bump();
+        } else if let Some(_) = self.check_and_bump(TokenKind::Comma) {
             false
-        } else if self.tokenizer.peek().is_none() {
-            true
         } else {
             // On unexpected token, emit an error, but still return a statement
             self.emit_unexpected_token();
-
-            // advance to end
             self.take_until_eos();
-
             true
         };
 
@@ -768,15 +568,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         // an only-list. We need to look ahead since `only` is also a name - if only Fortran had
         // reserved the keywords!
 
-        let t = if self.check_name() {
-            self.tokenizer.bump().unwrap()
+        let t = if let Some(t) = self.check_name_and_bump() {
+            t
         } else {
             // On unexpected token, emit an error, but still return a statement
             self.emit_unexpected_token();
-
-            // advance to end
             self.take_until_eos();
-
             return unspecified_use;
         };
 
@@ -787,22 +584,16 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         };
 
         // Determine if we're in a rename list or an only list
-        let what_is_it = if self.check(TokenKind::Arrow) {
-            self.tokenizer.bump();
+        let what_is_it = if let Some(_) = self.check_and_bump(TokenKind::Arrow) {
             WhatIsIt::NameRename(
                 t.try_intern_contents(&mut self.interner, &self.text)
                     .unwrap(),
             )
         } else if t.kind == TokenKind::Keyword(KeywordTokenKind::Operator)
-            && self.check(TokenKind::LeftParen)
+            && self.check_and_bump(TokenKind::LeftParen).is_some()
         {
-            self.tokenizer.bump();
-
-            let name = if self.check(TokenKind::DefinedOperator) {
-                self.tokenizer
-                    .bump()
-                    .unwrap()
-                    .try_intern_contents(&mut self.interner, &self.text)
+            let name = if let Some(t) = self.check_and_bump(TokenKind::DefinedOperator) {
+                t.try_intern_contents(&mut self.interner, &self.text)
                     .unwrap()
             } else {
                 self.emit_unexpected_token();
@@ -810,8 +601,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 return unspecified_use;
             };
 
-            if self.check(TokenKind::RightParen) {
-                self.tokenizer.bump();
+            if let Some(_) = self.check_and_bump(TokenKind::RightParen) {
             } else {
                 self.emit_unexpected_token();
                 self.take_until_eos();
@@ -820,16 +610,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
 
             WhatIsIt::OperatorRename(name)
         } else if t.kind == TokenKind::Keyword(KeywordTokenKind::Only)
-            && self.check(TokenKind::Colon)
+            && self.check_and_bump(TokenKind::Colon).is_some()
         {
             WhatIsIt::OnlyList
         } else {
             // On unexpected token, emit an error, but still return a statement
             self.emit_unexpected_token();
-
-            // advance to end
             self.take_until_eos();
-
             return unspecified_use;
         };
 
@@ -881,19 +668,12 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
             }
             FirstRenameOrOnly::Only => {
-                debug_assert_eq!(TokenKind::Colon, self.tokenizer.peek().unwrap().kind);
-
-                // consume :
-                self.tokenizer.bump().unwrap();
-
                 let mut first = true;
 
                 let onlys = self.arena.onlys.alloc_extend(std::iter::from_fn(|| {
                     if !first {
-                        if self.check(TokenKind::Comma) {
-                            self.tokenizer.bump();
-                        } else if self.check_eos() {
-                            self.tokenizer.bump();
+                        if let Some(_) = self.check_and_bump(TokenKind::Comma) {
+                        } else if let Some(_) = self.check_eos_and_bump() {
                             return None;
                         } else {
                             panic!(

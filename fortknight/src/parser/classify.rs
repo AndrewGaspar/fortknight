@@ -261,15 +261,6 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         self.tokenizer.expect_token(kind, expected)
     }
 
-    fn check(&mut self, expected: TokenKind) -> bool {
-        if let Some(k) = self.tokenizer.peek_kind() {
-            self.expect_token(k, expected)
-        } else {
-            self.tokenizer.push_expected(expected);
-            false
-        }
-    }
-
     fn emit_unexpected_token(&mut self) {
         let mut tokens: Vec<_> = self.tokenizer.expected_tokens.iter().cloned().collect();
         tokens.sort();
