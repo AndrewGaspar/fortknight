@@ -122,7 +122,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 self.tokenizer.peek_nth_kind(2),
             ) {
                 (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
-                    let char_literal_constant = self.char_literal_constant()?;
+                    let char_literal_constant = self.check_and_bump_char_literal_constant(true)?;
 
                     Some(Spanned::new(
                         PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
@@ -132,7 +132,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     ))
                 }
                 _ => {
-                    let int_literal_constant = self.int_literal_constant()?;
+                    let int_literal_constant = self.check_and_bump_int_literal_constant(true)?;
 
                     Some(Spanned::new(
                         PrimaryRaw::LiteralConstant(LiteralConstant::IntLiteralConstant(
@@ -170,7 +170,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 real_literal_constant.span,
             ))
         } else if self.check(TokenKind::CharLiteralConstant) {
-            let char_literal_constant = self.char_literal_constant()?;
+            let char_literal_constant = self.check_and_bump_char_literal_constant(true)?;
 
             Some(Spanned::new(
                 PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
@@ -196,7 +196,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 // possible the name may end with an underscore, which is legal.
                 (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant))
                 | (Some(TokenKind::CharLiteralConstant), _) => {
-                    let char_literal_constant = self.char_literal_constant()?;
+                    let char_literal_constant = self.check_and_bump_char_literal_constant(true)?;
 
                     Some(Spanned::new(
                         PrimaryRaw::LiteralConstant(LiteralConstant::CharLiteralConstant(
@@ -340,7 +340,8 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else if self.check(TokenKind::Plus) || self.check(TokenKind::Minus) {
             match self.tokenizer.peek_nth_kind(1) {
                 Some(TokenKind::DigitString) => {
-                    let signed_int_literal_constant = self.signed_int_literal_constant()?;
+                    let signed_int_literal_constant =
+                        self.expect_signed_int_literal_constant(true)?;
 
                     Some(Spanned::new(
                         ComplexLiteralPart::SignedIntLiteralConstant(
@@ -366,7 +367,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
             }
         } else if self.check(TokenKind::DigitString) {
-            let signed_int_literal_constant = self.signed_int_literal_constant()?;
+            let signed_int_literal_constant = self.expect_signed_int_literal_constant(true)?;
 
             Some(Spanned::new(
                 ComplexLiteralPart::SignedIntLiteralConstant(signed_int_literal_constant.val),
@@ -384,16 +385,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
-    fn int_literal_constant(&mut self) -> Option<Spanned<IntLiteralConstant<'arena>>> {
-        let t = if self.check(TokenKind::DigitString) {
-            self.tokenizer.bump().unwrap()
-        } else {
-            return None;
-        };
+    pub(super) fn check_and_bump_int_literal_constant(
+        &mut self,
+        has_kind_param: bool,
+    ) -> Option<Spanned<IntLiteralConstant<'arena>>> {
+        let t = self.check_and_bump(TokenKind::DigitString)?;
 
         let uint = t.try_into_uint(&self.text, &self.arena.big_uints).unwrap();
 
-        let (kind_param, span) = if self.check(TokenKind::Underscore) {
+        let (kind_param, span) = if has_kind_param && self.check(TokenKind::Underscore) {
             let Spanned {
                 val: kind_param,
                 span: kind_span,
@@ -413,24 +413,53 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         ))
     }
 
-    fn signed_int_literal_constant(&mut self) -> Option<Spanned<SignedIntLiteralConstant<'arena>>> {
-        let sign = if self.check(TokenKind::Plus) {
-            Some(Spanned::new(
-                Sign::Plus,
-                self.tokenizer.bump().unwrap().span,
-            ))
-        } else if self.check(TokenKind::Minus) {
-            Some(Spanned::new(
-                Sign::Minus,
-                self.tokenizer.bump().unwrap().span,
-            ))
+    pub(super) fn expect_int_literal_constant(
+        &mut self,
+        has_kind_param: bool,
+    ) -> Option<Spanned<IntLiteralConstant<'arena>>> {
+        if let Some(x) = self.check_and_bump_int_literal_constant(has_kind_param) {
+            Some(x)
+        } else {
+            self.emit_unexpected_token();
+            None
+        }
+    }
+
+    pub(super) fn check_and_bump_signed_int_literal_constant(
+        &mut self,
+        has_kind_param: bool,
+    ) -> Option<Spanned<SignedIntLiteralConstant>> {
+        let has_sign = self.check(TokenKind::Plus) || self.check(TokenKind::Minus);
+
+        let is_signed_int_literal_constant = if has_sign {
+            self.tokenizer.peek_nth_kind(1) == Some(TokenKind::DigitString)
+        } else {
+            self.check(TokenKind::DigitString)
+        };
+
+        if !is_signed_int_literal_constant {
+            return None;
+        }
+
+        self.expect_signed_int_literal_constant(has_kind_param)
+    }
+
+    pub(super) fn expect_signed_int_literal_constant(
+        &mut self,
+        has_kind_param: bool,
+    ) -> Option<Spanned<SignedIntLiteralConstant<'arena>>> {
+        let sign = if let Some(t) = self.check_and_bump(TokenKind::Plus) {
+            Some(Spanned::new(Sign::Plus, t.span))
+        } else if let Some(t) = self.check_and_bump(TokenKind::Minus) {
+            Some(Spanned::new(Sign::Minus, t.span))
         } else if self.check(TokenKind::DigitString) {
             None
         } else {
+            self.emit_unexpected_token();
             return None;
         };
 
-        let int_literal_constant = self.int_literal_constant()?;
+        let int_literal_constant = self.check_and_bump_int_literal_constant(has_kind_param)?;
 
         Some(Spanned::new(
             SignedIntLiteralConstant {
@@ -632,27 +661,29 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
     }
 
     /// R724: char-literal-constant
-    fn char_literal_constant(&mut self) -> Option<Spanned<CharLiteralConstant<'arena>>> {
-        let kind_param = if self.check(TokenKind::DigitString) || self.check_name() {
-            match (
-                self.tokenizer.peek_nth_kind(1),
-                self.tokenizer.peek_nth_kind(2),
-            ) {
-                (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
-                    Some(self.reverse_kind_param()?)
+    pub(super) fn check_and_bump_char_literal_constant(
+        &mut self,
+        has_kind_param: bool,
+    ) -> Option<Spanned<CharLiteralConstant<'arena>>> {
+        let kind_param =
+            if has_kind_param && (self.check(TokenKind::DigitString) || self.check_name()) {
+                match (
+                    self.tokenizer.peek_nth_kind(1),
+                    self.tokenizer.peek_nth_kind(2),
+                ) {
+                    (Some(TokenKind::Underscore), Some(TokenKind::CharLiteralConstant)) => {
+                        Some(self.reverse_kind_param()?)
+                    }
+                    (Some(TokenKind::CharLiteralConstant), _) if self.check_name() => {
+                        Some(self.reverse_kind_param()?)
+                    }
+                    _ => None,
                 }
-                (Some(TokenKind::CharLiteralConstant), _) if self.check_name() => {
-                    Some(self.reverse_kind_param()?)
-                }
-                _ => None,
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
-        if self.check(TokenKind::CharLiteralConstant) {
-            let t = self.tokenizer.bump().unwrap();
-
+        if let Some(t) = self.check_and_bump(TokenKind::CharLiteralConstant) {
             let quote_char = self.text[t.span.start as usize..].chars().next().unwrap();
 
             let cont_str = ContinuationStr::new(

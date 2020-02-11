@@ -21,6 +21,15 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         }
     }
 
+    pub(super) fn expect(&mut self, expected: TokenKind) -> Option<Token> {
+        if self.check(expected) {
+            self.tokenizer.bump()
+        } else {
+            self.emit_unexpected_token();
+            None
+        }
+    }
+
     pub(super) fn check_name(&mut self) -> bool {
         if let Some(k) = self.tokenizer.peek_kind() {
             if k.is_name() {

@@ -7,8 +7,13 @@ use typed_arena::Arena;
 use crate::error::{AnalysisErrorKind, DiagnosticSink, ParserErrorCode, SemanticErrorCode};
 use crate::index::FileId;
 use crate::intern::InternedName;
-use crate::parser::lex::{KeywordTokenKind, PeekableTokenizer, Token, TokenKind, TokenizerOptions};
+use crate::parser::lex::{
+    KeywordTokenKind, LexMode, PeekableTokenizer, Token, TokenKind, TokenizerOptions,
+};
 use crate::{num::Uint, span::Span};
+
+#[macro_use]
+mod macros;
 
 mod assignment;
 mod block;
@@ -17,6 +22,7 @@ mod expressions;
 mod format;
 mod implicit;
 mod import_stmt;
+mod list;
 mod statements;
 mod types;
 mod use_stmt;
@@ -24,8 +30,10 @@ mod use_stmt;
 #[cfg(test)]
 mod tests;
 
+pub use list::CommaResult;
 use statements::{
-    Expr, ImplicitSpec, LetterSpec, Only, ParentIdentifier, Rename, Spanned, TypeParamSpec,
+    Expr, FormatItem, ImplicitSpec, LetterSpec, Only, ParentIdentifier, Rename, Spanned,
+    TypeParamSpec,
 };
 pub use statements::{LabeledStmt, Stmt, StmtKind};
 
@@ -51,6 +59,8 @@ pub struct ClassifierArena<'arena> {
     expressions: Arena<Expr<'arena>>,
     big_uints: Arena<BigUint>,
     string_literals: Arena<String>,
+    format_items: Arena<FormatItem<'arena>>,
+    vs: Arena<statements::V<'arena>>,
 }
 
 impl<'arena> ClassifierArena<'arena> {
@@ -101,6 +111,10 @@ impl<'input> TokenState<'input> {
 
     pub(crate) fn push_expected(&mut self, expected: TokenKind) {
         self.expected_tokens.push(expected);
+    }
+
+    pub fn set_lex_mode(&mut self, mode: LexMode) {
+        self.tokenizer.set_lex_mode(mode);
     }
 }
 
@@ -711,8 +725,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             let token = self.tokenizer.bump().unwrap();
             self.stmt_from_end_block_data(token.span)
         } else if self.check(TokenKind::Keyword(KeywordTokenKind::Format)) {
-            let token = self.tokenizer.bump().unwrap();
-            self.format(&token.span)
+            self.format()
         } else if let Some(t) = self.check_eos_and_bump() {
             if let Some(label) = &label {
                 self.emit_error_span(
@@ -734,33 +747,5 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         };
 
         Some(LabeledStmt { stmt, label })
-    }
-
-    /// Called when there's an error parsing some comma separated list - attempt to skip to the next
-    /// item in the list, or to the end. Returns Some(()) when reaching a comma, returns None when
-    /// reached EOS.
-    ///
-    /// The comma/EOS is consumed
-    fn skip_to_comma_or_eos(&mut self) -> Option<()> {
-        // advance to next `only` or EOS
-        self.take_until(|lookahead| match lookahead {
-            Some(&Token {
-                kind: TokenKind::Comma,
-                ..
-            }) => TakeUntil::Stop,
-            Some(t) if Self::is_eos(t) => TakeUntil::Stop,
-            None => TakeUntil::Stop,
-            _ => TakeUntil::Continue,
-        })
-        .unwrap();
-
-        // bumps the final token so that we're either ready to parse the next only or the next
-        // statement
-        if let Some(_) = self.check_eos_and_bump() {
-            None
-        } else {
-            self.tokenizer.bump();
-            Some(())
-        }
     }
 }

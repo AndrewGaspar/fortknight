@@ -22,7 +22,7 @@ mod tests;
 mod token;
 
 use token::*;
-pub use token::{KeywordTokenKind, Letter, Token, TokenKind};
+pub use token::{FormatSpecifier, KeywordTokenKind, Letter, Token, TokenKind};
 
 #[derive(Clone, Copy, Default)]
 pub struct TokenizerOptions {
@@ -31,7 +31,7 @@ pub struct TokenizerOptions {
 
 /// Used to control how the file is lexed. Can be switched into different modes based on feedback
 /// from higher level parser.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum LexMode {
     Normal,
     Format,
@@ -193,6 +193,23 @@ impl<'input> Tokenizer<'input> {
         self.token(kind, idx0, idx1)
     }
 
+    fn format_specifier(&mut self, idx0: u32) -> Token {
+        let idx1 = self
+            .take_until(|lookahead| match lookahead {
+                Some((_, c)) if is_letter(c) => Continue,
+                _ => Stop,
+            })
+            .expect("Internal error: identifier tokens always terminate");
+
+        let word = CaseInsensitiveContinuationStr::new(&self.text_span(idx0, idx1)).to_string();
+
+        if let Some(kind) = FORMAT_SPECIFIERS_TRIE.get(&word) {
+            self.token(TokenKind::FormatSpecifier(*kind), idx0, idx1)
+        } else {
+            self.unrecognized_token(idx0)
+        }
+    }
+
     fn unrecognized_token(&mut self, idx0: u32) -> Token {
         let tokenize_preprocessor = self.tokenize_preprocessor;
 
@@ -321,7 +338,7 @@ impl<'input> Tokenizer<'input> {
         let idx1 = self.take_digit_string();
 
         match self.peek() {
-            Some((_, '.')) => {
+            Some((_, '.')) if self.mode == LexMode::Normal => {
                 self.bump();
                 match self.peek() {
                     Some((_, c)) if is_digit(c) => self.decimal(idx0),
@@ -332,7 +349,7 @@ impl<'input> Tokenizer<'input> {
                     None => self.token(TokenKind::RealLiteralConstant, idx0, self.text_len()),
                 }
             }
-            Some((_, c)) if is_exponent_letter(c) => {
+            Some((_, c)) if self.mode == LexMode::Normal && is_exponent_letter(c) => {
                 self.bump();
                 self.finish_exponent(idx0)
             }
@@ -531,11 +548,11 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '.') => {
                 self.bump();
-                match self.peek() {
+                match (self.mode, self.peek()) {
                     // if followed by a letter, then this must be an operator
-                    Some((_, c)) if is_letter(c) => self.operator(idx0),
+                    (LexMode::Normal, Some((_, c))) if is_letter(c) => self.operator(idx0),
                     // If followed by a digit, then this must be an real literal constant
-                    Some((_, c)) if is_digit(c) => self.decimal(idx0),
+                    (LexMode::Normal, Some((_, c))) if is_digit(c) => self.decimal(idx0),
                     // else just return the dot token
                     _ => self.token(TokenKind::Dot, idx0, idx0 + 1),
                 }
@@ -574,9 +591,12 @@ impl<'input> Tokenizer<'input> {
                 self.bump();
                 self.commentary(idx0)
             }
-            (idx0, c) if is_identifier_start(c) => {
+            (idx0, c) if is_letter(c) => {
                 self.bump();
-                self.identifierish(idx0)
+                match self.mode {
+                    LexMode::Normal => self.identifierish(idx0),
+                    LexMode::Format => self.format_specifier(idx0),
+                }
             }
             (idx0, '#') if self.tokenize_preprocessor => {
                 self.bump();
@@ -851,10 +871,6 @@ fn is_exponent_letter(c: char) -> bool {
 }
 
 fn is_operator_continue(c: char) -> bool {
-    is_letter(c)
-}
-
-fn is_identifier_start(c: char) -> bool {
     is_letter(c)
 }
 

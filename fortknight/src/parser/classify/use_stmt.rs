@@ -77,7 +77,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            return Err(if self.skip_to_comma_or_eos().is_none() {
+            return Err(if self.skip_past_comma_or_eos().is_none() {
                 TakeUntil::Stop
             } else {
                 TakeUntil::Continue
@@ -97,7 +97,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            Err(if self.skip_to_comma_or_eos().is_none() {
+            Err(if self.skip_past_comma_or_eos().is_none() {
                 TakeUntil::Stop
             } else {
                 TakeUntil::Continue
@@ -113,7 +113,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             } else {
                 self.emit_unexpected_token();
 
-                return Err(if self.skip_to_comma_or_eos().is_none() {
+                return Err(if self.skip_past_comma_or_eos().is_none() {
                     TakeUntil::Stop
                 } else {
                     TakeUntil::Continue
@@ -124,7 +124,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            return Err(if self.skip_to_comma_or_eos().is_none() {
+            return Err(if self.skip_past_comma_or_eos().is_none() {
                 TakeUntil::Stop
             } else {
                 TakeUntil::Continue
@@ -137,7 +137,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            return Err(if self.skip_to_comma_or_eos().is_none() {
+            return Err(if self.skip_past_comma_or_eos().is_none() {
                 TakeUntil::Stop
             } else {
                 TakeUntil::Continue
@@ -158,7 +158,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            return Err(if self.skip_to_comma_or_eos().is_none() {
+            return Err(if self.skip_past_comma_or_eos().is_none() {
                 TakeUntil::Stop
             } else {
                 TakeUntil::Continue
@@ -186,7 +186,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
         } else {
             self.emit_unexpected_token();
 
-            self.skip_to_comma_or_eos()?;
+            self.skip_past_comma_or_eos()?;
             None
         }
     }
@@ -229,7 +229,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
             } else {
                 self.emit_unexpected_token();
 
-                self.skip_to_comma_or_eos()?;
+                self.skip_past_comma_or_eos()?;
                 continue;
             };
 
@@ -256,14 +256,14 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 } else {
                     self.emit_unexpected_token();
 
-                    self.skip_to_comma_or_eos()?;
+                    self.skip_past_comma_or_eos()?;
                     continue;
                 };
 
                 if let Some(_) = self.check_and_bump(TokenKind::RightParen) {
                 } else {
                     self.emit_unexpected_token();
-                    self.skip_to_comma_or_eos()?;
+                    self.skip_past_comma_or_eos()?;
                     continue;
                 }
 
@@ -271,7 +271,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     // rename_operator_rhs consumes the arrow
                 } else {
                     self.emit_unexpected_token();
-                    self.skip_to_comma_or_eos()?;
+                    self.skip_past_comma_or_eos()?;
                     continue;
                 }
 
@@ -281,7 +281,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 }
             } else {
                 self.emit_unexpected_token();
-                self.skip_to_comma_or_eos()?;
+                self.skip_past_comma_or_eos()?;
                 continue;
             }
         }
@@ -300,7 +300,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                 // On unexpected token, emit an error, but still return a statement
                 self.emit_unexpected_token();
 
-                self.skip_to_comma_or_eos()?;
+                self.skip_past_comma_or_eos()?;
                 continue;
             };
 
@@ -356,13 +356,13 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         // If it's just a plain name, then it should be followed by a comma or
                         // arrow
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     }
                 }
             } else {
                 self.emit_unexpected_token();
-                self.skip_to_comma_or_eos()?;
+                self.skip_past_comma_or_eos()?;
                 continue;
             };
 
@@ -405,7 +405,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         Spanned::new(Only::Rename(rename.val), rename.span)
                     } else {
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     }
                 }
@@ -413,7 +413,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                     if let Some(_) = self.check_and_bump(TokenKind::Equals) {
                     } else {
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     }
 
@@ -430,7 +430,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         )
                     } else {
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     }
                 }
@@ -453,7 +453,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         }
                     } else {
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     };
 
@@ -472,7 +472,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         )
                     } else {
                         self.emit_unexpected_token();
-                        self.skip_to_comma_or_eos()?;
+                        self.skip_past_comma_or_eos()?;
                         continue;
                     }
                 }

@@ -610,23 +610,23 @@ pub struct AssignmentStmt<'a> {
 
 /// R1115: team-value is scalar-expr
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct TeamValue<'a>(&'a Expr<'a>);
+pub struct TeamValue<'a>(pub &'a Expr<'a>);
 
 /// R1124: do-variable is scalar-int-variable-name
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct DoVariable(InternedName);
+pub struct DoVariable(pub InternedName);
 
 /// R1301: format-stmt is FORMAT format-specification
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct FormatStmt<'a>(FormatSpecification<'a>);
+pub struct FormatStmt<'a>(pub FormatSpecification<'a>);
 
 /// R1302: format-specification
 ///     is ( [ format-items ] )
 ///     or ( [ format-items , ] unlimited-format-item)
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FormatSpecification<'a> {
-    format_items: &'a [FormatItem<'a>],
-    unlimited_format_item: Option<UnlimitedFormatItem<'a>>,
+    pub format_items: &'a [FormatItem<'a>],
+    pub unlimited_format_item: Option<UnlimitedFormatItem<'a>>,
 }
 
 /// R1304: format-item
@@ -650,7 +650,7 @@ pub struct UnlimitedFormatItem<'a> {
 
 /// R1306: r is int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct R<'a>(IntLiteralConstant<'a>);
+pub struct R<'a>(pub IntLiteralConstant<'a>);
 
 /// R1307: data-edit-desc
 ///     is I w [ . m ]
@@ -687,23 +687,23 @@ pub enum DataEditDesc<'a> {
 
 /// R1308: w is int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct W<'a>(IntLiteralConstant<'a>);
+pub struct W<'a>(pub IntLiteralConstant<'a>);
 
 /// R1309: m is int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct M<'a>(IntLiteralConstant<'a>);
+pub struct M<'a>(pub IntLiteralConstant<'a>);
 
 /// R1310: d is int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct D<'a>(IntLiteralConstant<'a>);
+pub struct D<'a>(pub IntLiteralConstant<'a>);
 
 /// R1311: e is int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct E<'a>(IntLiteralConstant<'a>);
+pub struct E<'a>(pub IntLiteralConstant<'a>);
 
 /// R1312: v is signed-int-literal-constant
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct V<'a>(SignedIntLiteralConstant<'a>);
+pub struct V<'a>(pub SignedIntLiteralConstant<'a>);
 
 /// R1313: control-edit-desc
 ///     is position-edit-desc

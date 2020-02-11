@@ -15,6 +15,7 @@ use crate::span::Span;
 
 mod assignment_tests;
 mod block_tests;
+mod format_tests;
 mod implicit_tests;
 mod label_tests;
 

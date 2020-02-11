@@ -169,7 +169,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         // unexpected token - advance until we consume a comma or exit at EOS
                         self.emit_unexpected_token();
 
-                        match self.skip_to_comma_or_eos() {
+                        match self.skip_past_comma_or_eos() {
                             Some(()) => {}
                             _ => return None,
                         }
@@ -188,7 +188,7 @@ impl<'input, 'arena> Classifier<'input, 'arena> {
                         // stop parsing if we reach EOS.
                         self.emit_unexpected_token();
 
-                        match self.skip_to_comma_or_eos() {
+                        match self.skip_past_comma_or_eos() {
                             // Try parsing the next name
                             Some(()) => continue,
                             // End of statement - stop parsing statement
