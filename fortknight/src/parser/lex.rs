@@ -905,7 +905,7 @@ fn is_recognized_character(c: char, tokenize_preprocessor: bool) -> bool {
         || c.is_whitespace()
         || match c {
             '_' | '=' | '+' | '-' | '*' | '/' | '\\' | '(' | ')' | '[' | ']' | ',' | '.' | ':'
-            | ';' | '!' | '"' | '%' | '&' | '<' | '>' => true,
+            | ';' | '!' | '\'' | '"' | '%' | '&' | '<' | '>' => true,
             '#' => tokenize_preprocessor,
             _ => false,
         }
