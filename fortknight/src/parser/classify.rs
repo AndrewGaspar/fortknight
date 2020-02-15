@@ -112,10 +112,6 @@ impl<'input> TokenState<'input> {
     pub(crate) fn push_expected(&mut self, expected: TokenKind) {
         self.expected_tokens.push(expected);
     }
-
-    pub fn set_lex_mode(&mut self, mode: LexMode) {
-        self.tokenizer.set_lex_mode(mode);
-    }
 }
 
 pub struct Classifier<'input, 'arena> {

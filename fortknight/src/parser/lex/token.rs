@@ -247,7 +247,6 @@ pub enum TokenKind {
     Name,
     Keyword(KeywordTokenKind),
     Letter(Letter),
-    FormatSpecifier(FormatSpecifier),
 
     NewLine,
     Commentary,
@@ -321,7 +320,6 @@ impl TokenKind {
             Name => "name".into(),
             Keyword(keyword) => format!("`{:?}`", keyword).to_uppercase(),
             Letter(letter) => format!("`{:?}`", letter).to_uppercase(),
-            FormatSpecifier(_) => "format-item".into(),
 
             NewLine => "new-line".into(),
             Commentary => "commentary".into(),
@@ -1361,67 +1359,12 @@ impl KeywordTokenKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive, PartialOrd, Ord)]
-pub enum FormatSpecifier {
-    Min,
-    I,
-    B,
-    O,
-    Z,
-    F,
-    E,
-    EN,
-    ES,
-    EX,
-    G,
-    L,
-    A,
-    D,
-    DT,
-    P,
-    T,
-    TL,
-    TR,
-    X,
-    SS,
-    SP,
-    S,
-    BN,
-    BZ,
-    RU,
-    RD,
-    RZ,
-    RN,
-    RC,
-    RP,
-    DC,
-    DP,
-    Max,
-}
-
-impl FormatSpecifier {
-    pub fn all() -> impl Iterator<Item = Self> {
-        let min = FormatSpecifier::Min.to_usize().unwrap() + 1;
-        let max = FormatSpecifier::Max.to_usize().unwrap();
-
-        (min..max).map(|k| FormatSpecifier::from_usize(k).unwrap())
-    }
-}
-
 lazy_static::lazy_static! {
     pub static ref KEYWORDS_TRIE: radix_trie::Trie<String, KeywordTokenKind> = {
         use std::iter::FromIterator;
 
         radix_trie::Trie::from_iter(
             KeywordTokenKind::all().map(
-                |kind| (format!("{:?}", kind).to_lowercase(), kind)))
-    };
-
-    pub static ref FORMAT_SPECIFIERS_TRIE: radix_trie::Trie<String, FormatSpecifier> = {
-        use std::iter::FromIterator;
-
-        radix_trie::Trie::from_iter(
-            FormatSpecifier::all().map(
                 |kind| (format!("{:?}", kind).to_lowercase(), kind)))
     };
 }

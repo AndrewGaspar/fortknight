@@ -29,14 +29,6 @@ pub struct TokenizerOptions {
     pub tokenize_preprocessor: bool,
 }
 
-/// Used to control how the file is lexed. Can be switched into different modes based on feedback
-/// from higher level parser.
-#[derive(Copy, Clone, PartialEq)]
-pub enum LexMode {
-    Normal,
-    Format,
-}
-
 #[derive(Clone)]
 pub struct Tokenizer<'input> {
     chars: FortranPreprocessor<'input>,
@@ -72,19 +64,6 @@ impl<'input> Tokenizer<'input> {
             ),
             tokenize_preprocessor: options.tokenize_preprocessor,
             mode: LexMode::Normal,
-        }
-    }
-
-    /// Lexing behavior changes depending on whether we're in "normal" mode or "format" mode.
-    pub fn set_lex_mode(&mut self, mode: LexMode) {
-        self.mode = mode;
-        match self.mode {
-            LexMode::Format => {
-                self.chars.insignificant_whitespace(true);
-            }
-            LexMode::Normal => {
-                self.chars.insignificant_whitespace(false);
-            }
         }
     }
 
@@ -338,7 +317,7 @@ impl<'input> Tokenizer<'input> {
         let idx1 = self.take_digit_string();
 
         match self.peek() {
-            Some((_, '.')) if self.mode == LexMode::Normal => {
+            Some((_, '.')) => {
                 self.bump();
                 match self.peek() {
                     Some((_, c)) if is_digit(c) => self.decimal(idx0),
@@ -349,7 +328,7 @@ impl<'input> Tokenizer<'input> {
                     None => self.token(TokenKind::RealLiteralConstant, idx0, self.text_len()),
                 }
             }
-            Some((_, c)) if self.mode == LexMode::Normal && is_exponent_letter(c) => {
+            Some((_, c)) if is_exponent_letter(c) => {
                 self.bump();
                 self.finish_exponent(idx0)
             }
@@ -548,11 +527,11 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, '.') => {
                 self.bump();
-                match (self.mode, self.peek()) {
+                match self.peek() {
                     // if followed by a letter, then this must be an operator
-                    (LexMode::Normal, Some((_, c))) if is_letter(c) => self.operator(idx0),
+                    (Some((_, c))) if is_letter(c) => self.operator(idx0),
                     // If followed by a digit, then this must be an real literal constant
-                    (LexMode::Normal, Some((_, c))) if is_digit(c) => self.decimal(idx0),
+                    (Some((_, c))) if is_digit(c) => self.decimal(idx0),
                     // else just return the dot token
                     _ => self.token(TokenKind::Dot, idx0, idx0 + 1),
                 }
@@ -593,10 +572,7 @@ impl<'input> Tokenizer<'input> {
             }
             (idx0, c) if is_letter(c) => {
                 self.bump();
-                match self.mode {
-                    LexMode::Normal => self.identifierish(idx0),
-                    LexMode::Format => self.format_specifier(idx0),
-                }
+                self.identifierish(idx0),
             }
             (idx0, '#') if self.tokenize_preprocessor => {
                 self.bump();
@@ -970,12 +946,6 @@ impl<'input> PeekableTokenizer<'input> {
         }
 
         Some(&self.peeked[n])
-    }
-
-    /// Lexing behavior changes depending on whether we're in "normal" mode or "format" mode.
-    pub fn set_lex_mode(&mut self, mode: LexMode) {
-        self.reset();
-        self.tokenizer.set_lex_mode(mode);
     }
 }
 
